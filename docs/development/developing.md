@@ -316,7 +316,8 @@ No release is started when only test packages or workflow actions changed, becau
 shipped to users differs. Major updates of packages other than Playwright and the runtime
 packages still open pull requests and run CI, but are left for manual review with a comment
 explaining why; after merging one by hand, start the Packages workflow yourself if it should
-ship.
+ship. Major updates of workflow actions merge automatically: the CI run that approves them
+already used the updated actions.
 
 A Playwright update changes the pin that the Dockerfile's apt package list follows. The
 Linux package job installs and verifies the matching Chromium, so a missing library fails
