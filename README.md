@@ -148,8 +148,9 @@ dotnet test --solution Pressroom.slnx -c Release
 
 The prerequisites are the .NET 10 SDK and, for publishing, a Visual Studio release
 that supports .NET 10 on Windows x64. Publishing acquires the browser payload used
-by browser tests and releases. A manual GitHub Actions workflow builds releases;
-the developer guide in `docs/development` has the details.
+by browser tests and releases. A GitHub Actions workflow builds releases, started by
+hand or by CI after a Dependabot update passes the tests; the developer guide in
+`docs/development` has the details.
 
 ## License
 

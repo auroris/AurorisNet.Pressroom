@@ -1,0 +1,64 @@
+# Dependabot opens the pull requests that .github/workflows/ci.yml tests, merges and
+# releases. See docs/development/developing.md ("Automatic dependency updates and releases").
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 10
+    groups:
+      # Microsoft.Playwright is the primary dependency: it selects the Chromium build that
+      # every installer and container ships. It gets its own pull request, so each Playwright
+      # update becomes its own release. Its version is the PressroomPlaywrightVersion
+      # property in src/Pressroom.Rendering/Pressroom.Rendering.csproj.
+      playwright:
+        patterns:
+          - "Microsoft.Playwright"
+        update-types:
+          - minor
+          - patch
+      # Test-only packages never reach consumers, so merging them does not create a release.
+      test-dependencies:
+        patterns:
+          - "xunit*"
+          - "Microsoft.AspNetCore.Mvc.Testing"
+        update-types:
+          - minor
+          - patch
+      dependencies:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "Microsoft.Playwright"
+          - "xunit*"
+          - "Microsoft.AspNetCore.Mvc.Testing"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Stay on the Playwright major the code is written against. Major updates of other
+      # packages still open pull requests, but CI leaves them for manual review.
+      - dependency-name: "Microsoft.Playwright"
+        update-types:
+          - "version-update:semver-major"
+      # The runtime packages follow the net10.0 target framework; their next major is the
+      # next .NET, which is a target-framework change made by hand.
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types:
+          - "version-update:semver-major"
+
+  # The Dockerfiles use floating base-image tags (dotnet/sdk:10.0, dotnet/aspnet:10.0,
+  # windows/server:ltsc2022) that the build helpers always pull, so there is no docker entry.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns:
+          - "*"

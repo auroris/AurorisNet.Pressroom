@@ -1,13 +1,21 @@
 name: Packages
-run-name: Packages v${{ inputs.version }} from ${{ github.ref_name }}
+run-name: Packages ${{ inputs.version && format('v{0}', inputs.version) || format('(next {0})', inputs.bump) }} from ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version without v (for example, 1.2.3 or 1.2.3-rc.1)'
-        required: true
+        description: 'Release version without v (for example, 1.2.3 or 1.2.3-rc.1). Leave blank to bump the latest stable tag.'
+        required: false
         type: string
+      bump:
+        description: Which part of the latest stable tag to bump when version is blank
+        required: false
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
       draft:
         description: If creating a release, save it as a draft
         type: boolean
@@ -28,12 +36,13 @@ on:
 permissions:
   contents: read
 
+# One fixed group: blank-version runs compute the next version from the tags, so two
+# concurrent runs could otherwise pick the same one.
 concurrency:
-  group: release-${{ inputs.version }}
+  group: release
   cancel-in-progress: false
 
 env:
-  RELEASE_VERSION: ${{ inputs.version }}
   CREATE_RELEASE: ${{ inputs.create_release }}
 
 defaults:
@@ -46,6 +55,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
+      version: ${{ steps.versions.outputs.version }}
       playwright: ${{ steps.versions.outputs.playwright }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,19 +64,42 @@ jobs:
           persist-credentials: false
       - name: Validate the version
         id: versions
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BUMP: ${{ inputs.bump || 'patch' }}
         run: |
+          $version = $env:RELEASE_VERSION.Trim()
+          if (-not $version) {
+            # No version given (the CI workflow dispatches releases this way): bump the
+            # highest stable v<major>.<minor>.<patch> tag. Prerelease tags are skipped.
+            $tags = git tag --list 'v*'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not list tags.' }
+            $latest = @($tags) |
+              Where-Object { $_ -cmatch '\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z' } |
+              ForEach-Object { [version]$_.Substring(1) } |
+              Sort-Object -Descending |
+              Select-Object -First 1
+            if (-not $latest) { throw 'No stable vMAJOR.MINOR.PATCH tag exists to bump. Enter a version.' }
+            $version = switch ($env:RELEASE_BUMP) {
+              'minor' { "$($latest.Major).$($latest.Minor + 1).0" }
+              'patch' { "$($latest.Major).$($latest.Minor).$($latest.Build + 1)" }
+              default { throw "Unknown bump '$($env:RELEASE_BUMP)'. Use patch or minor." }
+            }
+            Write-Host "Bumping $env:RELEASE_BUMP from v$latest to v$version"
+          }
           $number = '(0|[1-9][0-9]*)'
           $identifier = '(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
           $pattern = "\A$number\.$number\.$number(?:-$identifier(?:\.$identifier)*)?\z"
-          if ($env:RELEASE_VERSION -cnotmatch $pattern) {
+          if ($version -cnotmatch $pattern) {
             throw 'Use a version such as 1.2.3 or 1.2.3-rc.1, without a v prefix or build metadata.'
           }
-          foreach ($part in ($env:RELEASE_VERSION.Split('-')[0].Split('.'))) {
+          foreach ($part in ($version.Split('-')[0].Split('.'))) {
             if ([long]$part -gt 65534) { throw 'Version components must be at most 65534 for .NET assembly versions.' }
           }
-          $existingTag = git tag --list "v$env:RELEASE_VERSION"
+          $existingTag = git tag --list "v$version"
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect repository tags.' }
           if ($env:CREATE_RELEASE -eq 'true' -and $existingTag) { throw 'This version already has a tag. Choose a new release version.' }
+          "version=$version" >> $env:GITHUB_OUTPUT
           # Both installers use the checked-in PressroomPlaywrightVersion so one release
           # carries the same Playwright version and matching Chromium on both platforms.
           $playwright = ./build/Resolve-PlaywrightVersion.ps1 -Version pinned
@@ -86,6 +119,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
       PLAYWRIGHT_VERSION: ${{ needs.validate.outputs.playwright }}
       # Cache only this workflow's dependencies, not the runner's preinstalled packages.
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
@@ -157,6 +191,8 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -199,6 +235,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
       PLAYWRIGHT_VERSION: ${{ needs.validate.outputs.playwright }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -227,14 +264,14 @@ jobs:
       - name: Generate SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
-          image: ghcr.io/auroris/pressroom:${{ inputs.version }}
+          image: ghcr.io/auroris/pressroom:${{ needs.validate.outputs.version }}
           format: spdx-json
           output-file: artifacts/linux-release/pressroom.spdx.json
           upload-release-assets: false
       - name: Reject critical vulnerabilities
         uses: aquasecurity/trivy-action@8f28faec26515256b6d22074d1d2a8986f4cbd87
         with:
-          image-ref: ghcr.io/auroris/pressroom:${{ inputs.version }}
+          image-ref: ghcr.io/auroris/pressroom:${{ needs.validate.outputs.version }}
           severity: CRITICAL
           exit-code: '1'
           format: table
@@ -254,6 +291,8 @@ jobs:
     permissions:
       actions: read
       id-token: write
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -296,6 +335,8 @@ jobs:
     permissions:
       actions: read
       contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - name: Download the verified packages from this run
         env:

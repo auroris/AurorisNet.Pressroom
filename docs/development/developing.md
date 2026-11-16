@@ -213,9 +213,13 @@ the pin.
 ## Manual package builds and GitHub releases
 
 The [Packages workflow](../../.github/workflows/release.yml) has only a
-`workflow_dispatch` trigger. Open **Actions → Packages → Run workflow**, select
-the branch and enter a version without `v`, such as `1.2.3` or `1.2.3-rc.1`.
-Three jobs run in parallel after input validation:
+`workflow_dispatch` trigger; [Dependabot updates](#automatic-dependency-updates-and-releases)
+start it through that trigger. Open **Actions → Packages → Run workflow**, select
+the branch and enter a version without `v`, such as `1.2.3` or `1.2.3-rc.1`, or leave
+the version blank and pick a **bump** (`patch` or `minor`) to increment the latest stable
+`v*` tag. A blank version bumps the highest `vMAJOR.MINOR.PATCH` tag; prerelease tags are
+ignored when choosing it. Runs serialize in one concurrency group, so two blank-version
+runs cannot compute the same version. Three jobs run in parallel after input validation:
 
 | GitHub artifact | Contents |
 |---|---|
@@ -281,6 +285,54 @@ version suffix controls NuGet prerelease status.
 
 Bump `Version` in `Directory.Build.props` and the `-Version` defaults of the build
 helpers when starting a new release line, so local builds and workflow runs agree.
+The `v*` tags remain the source of the next automated version; the property only
+sets the version of local builds.
+
+## Automatic dependency updates and releases
+
+[Dependabot](../../.github/dependabot.yml) checks NuGet packages daily, so a new
+Playwright release is picked up within a day, and GitHub Actions weekly. It opens grouped
+pull requests: one for `Microsoft.Playwright` (the primary dependency, through the
+`PressroomPlaywrightVersion` property), one for test-only packages, one for everything
+else, and one for workflow actions. Playwright stays on its current major version;
+Dependabot never proposes a Playwright major update. The `Microsoft.AspNetCore.*` and
+`Microsoft.Extensions.*` packages follow the `net10.0` target framework, so their major
+updates are ignored as well: moving to the next .NET is a target-framework change made by
+hand. The Dockerfiles use floating base-image tags that the build helpers always pull, so
+Dependabot does not watch them.
+
+The [CI workflow](../../.github/workflows/ci.yml) restores, builds and runs the test suite
+on Windows and Linux, without the real-browser tests, for every pull request and for pushes
+to `main`. For a Dependabot pull request that passes on both, its final job:
+
+1. Squash-merges the pull request into `main` and deletes the branch.
+2. Starts the Packages workflow on `main` with a blank version, **create_release** and
+   **publish_nuget** enabled. Playwright and other minor updates bump the minor version;
+   patch updates bump the patch version. The release then runs exactly as a manual one,
+   including the sandboxed browser checks, the Linux critical-CVE gate and NuGet.org
+   publishing, and nothing ships if any of them fails.
+
+No release is started when only test packages or workflow actions changed, because nothing
+shipped to users differs. Major updates of packages other than Playwright and the runtime
+packages still open pull requests and run CI, but are left for manual review with a comment
+explaining why; after merging one by hand, start the Packages workflow yourself if it should
+ship.
+
+A Playwright update changes the pin that the Dockerfile's apt package list follows. The
+Linux package job installs and verifies the matching Chromium, so a missing library fails
+the release rather than shipping; refresh the list and the version comments in the
+Dockerfile when that happens. Container images are still published by hand through the
+separate Container images workflow.
+
+Dependabot workflows run with a read-only token, so the merge job requests `contents`,
+`pull-requests` and `actions` write permissions explicitly. Starting the Packages workflow
+through `workflow_dispatch` is the one way a workflow can trigger another with the built-in
+token, which is why CI does not rely on a push trigger. Several updates merged close
+together each queue a release; GitHub keeps one pending release run and cancels the ones
+between, and the last run still ships everything that was merged.
+
+To pause automation, remove or edit `.github/dependabot.yml`; to keep the updates but review
+them yourself, delete the `dependabot` job from `ci.yml`.
 
 ## Container images
 
