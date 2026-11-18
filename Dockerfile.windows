@@ -10,7 +10,7 @@ COPY artifacts/windows-container-publish/ C:/app/
 RUN New-Item -ItemType Directory -Force C:/state,C:/config | Out-Null; icacls C:/state /grant '*S-1-5-93-2-2:(OI)(CI)M'; if ($LASTEXITCODE -ne 0) { throw 'State permissions failed' }
 ENV DOTNET_ROOT=C:/dotnet
 ENV ASPNETCORE_URLS=http://+:8080
-LABEL org.opencontainers.image.source="https://github.com/auroris/Pressroom" `
+LABEL org.opencontainers.image.source="https://github.com/auroris/AurorisNet.Pressroom" `
       org.opencontainers.image.licenses="MIT" `
       org.opencontainers.image.title="Pressroom"
 USER ContainerUser

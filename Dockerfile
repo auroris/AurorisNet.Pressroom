@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /app /etc/pressroom /var/lib/pressroom \
     && chown pressroom:pressroom /var/lib/pressroom
 WORKDIR /app
-LABEL org.opencontainers.image.source="https://github.com/auroris/Pressroom" \
+LABEL org.opencontainers.image.source="https://github.com/auroris/AurorisNet.Pressroom" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.title="Pressroom"
 COPY --from=verified /payload/ /app/

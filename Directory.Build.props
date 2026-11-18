@@ -7,7 +7,7 @@
     <Deterministic>true</Deterministic>
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <Version>1.1.0</Version>
-    <Authors>Pressroom</Authors>
+    <Authors>Auroris</Authors>
     <IsPackable>false</IsPackable>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <!-- Keep referenced projects on the same private driver platform during profile publishing. -->

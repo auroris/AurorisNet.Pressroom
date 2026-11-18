@@ -1,126 +1,85 @@
-name: Packages
-run-name: Packages ${{ inputs.version && format('v{0}', inputs.version) || format('(next {0})', inputs.bump) }} from ${{ github.ref_name }}
+name: Release
 
+run-name: Release ${{ inputs.version || format('(next {0})', inputs.bump) }}${{ inputs.dry-run && ' (dry run)' || '' }}
+
+# Builds and verifies the Windows and Linux installers and the client package, publishes them as a GitHub release and
+# pushes the client package to nuget.org. Starts by hand, or from the CI workflow when a Dependabot update of a shipped
+# package has passed the tests. The shared steps come from auroris/AurorisNet.Build, whose docs/releasing.md describes
+# them. nuget.org trusts this file by its name, so keep it release.yml. Container images are a separate workflow.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version without v (for example, 1.2.3 or 1.2.3-rc.1). Leave blank to bump the latest stable tag.'
+        description: Version to publish, such as 1.2.3 or 1.2.3-rc.1. Leave empty to raise the newest release tag.
         required: false
         type: string
       bump:
-        description: Which part of the latest stable tag to bump when version is blank
-        required: false
+        description: Which part of the newest stable tag to raise when the version is empty
         type: choice
         default: patch
         options:
           - patch
           - minor
-      draft:
-        description: If creating a release, save it as a draft
+      test:
+        description: Run the unit tests before publishing. The automated runs turn this off, because they have just run them.
+        type: boolean
+        default: true
+      dry-run:
+        description: Build and verify the installers and the client package, and keep them as artifacts of the run
         type: boolean
         default: false
-      create_release:
-        description: Also attach all verified packages to a GitHub release
-        type: boolean
-        default: false
-      publish_nuget:
-        description: Also publish AurorisNet.Pressroom.Client to NuGet.org
-        type: boolean
-        default: false
-      prerelease:
-        description: If creating a release, mark it as a prerelease (automatic for suffixed versions)
-        type: boolean
-        default: false
+      notes:
+        description: Notes for the GitHub release, in Markdown, shown above the generated list of changes
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
-# One fixed group: blank-version runs compute the next version from the tags, so two
-# concurrent runs could otherwise pick the same one.
 concurrency:
   group: release
   cancel-in-progress: false
-
-env:
-  CREATE_RELEASE: ${{ inputs.create_release }}
 
 defaults:
   run:
     shell: pwsh
 
 jobs:
-  validate:
-    name: Validate package inputs
+  version:
+    name: Choose the version
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      version: ${{ steps.versions.outputs.version }}
-      playwright: ${{ steps.versions.outputs.playwright }}
+      version: ${{ steps.version.outputs.version }}
+      playwright: ${{ steps.playwright.outputs.playwright }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
-      - name: Validate the version
-        id: versions
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_BUMP: ${{ inputs.bump || 'patch' }}
+
+      - name: Choose the version
+        id: version
+        uses: auroris/AurorisNet.Build/actions/version@main
+        with:
+          version: ${{ inputs.version }}
+          bump: ${{ inputs.bump }}
+          dry-run: ${{ inputs.dry-run }}
+
+      # Both installers use the checked-in PressroomPlaywrightVersion, so one release carries the same Playwright
+      # version and matching Chromium on both platforms.
+      - name: Read the pinned Playwright version
+        id: playwright
         run: |
-          $version = $env:RELEASE_VERSION.Trim()
-          if (-not $version) {
-            # No version given (the CI workflow dispatches releases this way): bump the
-            # highest stable v<major>.<minor>.<patch> tag. Prerelease tags are skipped.
-            $tags = git tag --list 'v*'
-            if ($LASTEXITCODE -ne 0) { throw 'Could not list tags.' }
-            $latest = @($tags) |
-              Where-Object { $_ -cmatch '\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z' } |
-              ForEach-Object { [version]$_.Substring(1) } |
-              Sort-Object -Descending |
-              Select-Object -First 1
-            if (-not $latest) { throw 'No stable vMAJOR.MINOR.PATCH tag exists to bump. Enter a version.' }
-            $version = switch ($env:RELEASE_BUMP) {
-              'minor' { "$($latest.Major).$($latest.Minor + 1).0" }
-              'patch' { "$($latest.Major).$($latest.Minor).$($latest.Build + 1)" }
-              default { throw "Unknown bump '$($env:RELEASE_BUMP)'. Use patch or minor." }
-            }
-            Write-Host "Bumping $env:RELEASE_BUMP from v$latest to v$version"
-          }
-          $number = '(0|[1-9][0-9]*)'
-          $identifier = '(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
-          $pattern = "\A$number\.$number\.$number(?:-$identifier(?:\.$identifier)*)?\z"
-          if ($version -cnotmatch $pattern) {
-            throw 'Use a version such as 1.2.3 or 1.2.3-rc.1, without a v prefix or build metadata.'
-          }
-          foreach ($part in ($version.Split('-')[0].Split('.'))) {
-            if ([long]$part -gt 65534) { throw 'Version components must be at most 65534 for .NET assembly versions.' }
-          }
-          $existingTag = git tag --list "v$version"
-          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect repository tags.' }
-          if ($env:CREATE_RELEASE -eq 'true' -and $existingTag) { throw 'This version already has a tag. Choose a new release version.' }
-          "version=$version" >> $env:GITHUB_OUTPUT
-          # Both installers use the checked-in PressroomPlaywrightVersion so one release
-          # carries the same Playwright version and matching Chromium on both platforms.
           $playwright = ./build/Resolve-PlaywrightVersion.ps1 -Version pinned
           "playwright=$playwright" >> $env:GITHUB_OUTPUT
-      - name: Validate NuGet publishing configuration
-        if: ${{ inputs.publish_nuget }}
-        env:
-          NUGET_USER: ${{ vars.NUGET_USER }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:NUGET_USER)) {
-            throw 'Set the NUGET_USER repository variable to your NuGet.org profile username and configure Trusted Publishing before selecting publish_nuget.'
-          }
-
   build:
     name: Package Windows x64 for IIS
-    needs: validate
+    needs: version
     runs-on: windows-2025
     timeout-minutes: 45
     env:
-      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
-      PLAYWRIGHT_VERSION: ${{ needs.validate.outputs.playwright }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      PLAYWRIGHT_VERSION: ${{ needs.version.outputs.playwright }}
       # Cache only this workflow's dependencies, not the runner's preinstalled packages.
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     steps:
@@ -152,6 +111,7 @@ jobs:
         run: dotnet build Pressroom.slnx -c Release --no-restore "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
 
       - name: Run tests
+        if: ${{ inputs.test }}
         run: dotnet test --solution Pressroom.slnx -c Release --no-build --no-restore
 
       - name: Publish and verify the framework-dependent package
@@ -175,6 +135,7 @@ jobs:
           retention-days: 14
           overwrite: true
 
+      # These are the only tests that drive the packaged Chromium, so they run on every release, automated ones included.
       - name: Test the packaged Windows browser
         env:
           PRESSROOM_RUN_BROWSER_TESTS: '1'
@@ -188,11 +149,11 @@ jobs:
 
   client:
     name: Package the .NET client with bundled contracts
-    needs: validate
+    needs: version
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -204,13 +165,17 @@ jobs:
             10.0.x
             8.0.x
       - name: Restore, build, and test both client targets
+        env:
+          RUN_TESTS: ${{ inputs.test }}
         run: |
           dotnet restore tests/Pressroom.Contracts.Tests "-p:Version=$env:RELEASE_VERSION"
           if ($LASTEXITCODE -ne 0) { throw 'Client restore failed.' }
           dotnet build tests/Pressroom.Contracts.Tests -c Release --no-restore "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
           if ($LASTEXITCODE -ne 0) { throw 'Client build failed.' }
-          dotnet test --project tests/Pressroom.Contracts.Tests -c Release --no-build --no-restore
-          if ($LASTEXITCODE -ne 0) { throw 'Client tests failed.' }
+          if ($env:RUN_TESTS -eq 'true') {
+            dotnet test --project tests/Pressroom.Contracts.Tests -c Release --no-build --no-restore
+            if ($LASTEXITCODE -ne 0) { throw 'Client tests failed.' }
+          }
       - name: Pack
         run: |
           dotnet pack src/Pressroom.Client -c Release --no-build --no-restore -o artifacts/nuget "-p:Version=$env:RELEASE_VERSION" -p:ContinuousIntegrationBuild=true
@@ -231,12 +196,12 @@ jobs:
 
   linux:
     name: Package Linux x64 for local installation
-    needs: validate
+    needs: version
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
-      PLAYWRIGHT_VERSION: ${{ needs.validate.outputs.playwright }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      PLAYWRIGHT_VERSION: ${{ needs.version.outputs.playwright }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -264,14 +229,14 @@ jobs:
       - name: Generate SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          image: ghcr.io/auroris/pressroom:${{ needs.validate.outputs.version }}
+          image: ghcr.io/auroris/pressroom:${{ needs.version.outputs.version }}
           format: spdx-json
           output-file: artifacts/linux-release/pressroom.spdx.json
           upload-release-assets: false
       - name: Reject critical vulnerabilities
         uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec
         with:
-          image-ref: ghcr.io/auroris/pressroom:${{ needs.validate.outputs.version }}
+          image-ref: ghcr.io/auroris/pressroom:${{ needs.version.outputs.version }}
           severity: CRITICAL
           exit-code: '1'
           format: table
@@ -282,62 +247,22 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish-nuget:
-    name: Publish the .NET client to NuGet.org
-    needs: [validate, build, client, linux]
-    if: ${{ inputs.publish_nuget }}
+  release:
+    name: Publish
+    needs: [version, build, client, linux]
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       actions: read
+      contents: write
       id-token: write
     env:
-      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: 10.0.x
-      - name: Download the verified client package and symbols
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download $env:GITHUB_RUN_ID --repo $env:GITHUB_REPOSITORY --name nuget-packages --dir artifacts/nuget
-          if ($LASTEXITCODE -ne 0) { throw 'Could not download the client package.' }
-          foreach ($extension in @('nupkg', 'snupkg')) {
-            $name = "AurorisNet.Pressroom.Client.$env:RELEASE_VERSION.$extension"
-            $path = Join-Path artifacts/nuget $name
-            $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ((Get-Content -LiteralPath "$path.sha256" -Raw).Trim() -cne "$actual  $name") {
-              throw "Checksum mismatch for $name."
-            }
-          }
-      - name: Log in to NuGet.org with Trusted Publishing
-        id: nuget_login
-        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
-        with:
-          user: ${{ vars.NUGET_USER }}
-      - name: Push the client package and symbols
-        env:
-          NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
-          NUGET_SYMBOL_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
-        run: |
-          # NuGet also pushes the matching .snupkg beside this package.
-          dotnet nuget push "artifacts/nuget/AurorisNet.Pressroom.Client.$env:RELEASE_VERSION.nupkg" --source https://api.nuget.org/v3/index.json
-          if ($LASTEXITCODE -ne 0) { throw 'NuGet.org publication failed. Inspect the package and symbols before retrying.' }
-          "Published AurorisNet.Pressroom.Client $env:RELEASE_VERSION and symbols to NuGet.org." >> $env:GITHUB_STEP_SUMMARY
 
-  release:
-    name: Attach all packages to a GitHub release
-    needs: [validate, build, client, linux]
-    if: ${{ inputs.create_release }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      actions: read
-      contents: write
-    env:
-      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
-    steps:
       - name: Download the verified packages from this run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -346,23 +271,9 @@ jobs:
             gh run download $env:GITHUB_RUN_ID --repo $env:GITHUB_REPOSITORY --name $artifact --dir artifacts/release
             if ($LASTEXITCODE -ne 0) { throw "Could not download $artifact." }
           }
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_DRAFT: ${{ inputs.draft }}
-          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
-        run: |
-          $tag = "v$env:RELEASE_VERSION"
-          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
-          # Recheck immediately before publishing; never reuse or move an existing tag/release.
-          foreach ($resource in @("git/ref/tags/$tag", "releases/tags/$tag")) {
-            $response = Invoke-WebRequest -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/$resource" `
-              -Headers $headers -SkipHttpErrorCheck
-            if ($response.StatusCode -ne 404) {
-              throw "Expected an unused release version; GitHub returned HTTP $($response.StatusCode) for $resource."
-            }
-          }
 
+      - name: Check every file against its checksum
+        run: |
           $checksums = @(Get-ChildItem artifacts/release -Filter '*.sha256' -File)
           if ($checksums.Count -ne 4) { throw 'Expected checksums for both installers, the client NuGet package, and its symbols.' }
           foreach ($checksum in $checksums) {
@@ -371,7 +282,12 @@ jobs:
             $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
             if ((Get-Content $checksum.FullName -Raw).Trim() -cne "$actual  $name") { throw "Checksum mismatch for $name." }
           }
-          $assets = @(Get-ChildItem artifacts/release -File | ForEach-Object FullName)
+
+      - name: Write the release notes
+        id: notes
+        env:
+          RELEASE_NOTES: ${{ inputs.notes }}
+        run: |
           $notes = @"
           Pressroom $env:RELEASE_VERSION, built from commit $env:GITHUB_SHA.
 
@@ -383,19 +299,19 @@ jobs:
 
           The builds passed tests and sandboxed PDF warm-up. Target-server IIS/Linux acceptance remains a deployment check; see the acceptance guides in each package. The Linux SBOM describes the container used to verify its payload. Container image publishing is a separate manual workflow.
           "@
-          $notesPath = Join-Path $env:RUNNER_TEMP 'pressroom-release-notes.md'
-          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
-          # Creating the ref is atomic: a concurrent tag creation fails instead of
-          # letting gh attach these binaries to a different existing commit.
-          $tagBody = @{ ref = "refs/tags/$tag"; sha = $env:GITHUB_SHA } | ConvertTo-Json
-          Invoke-RestMethod -Method Post -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/git/refs" `
-            -Headers $headers -ContentType 'application/json' -Body $tagBody | Out-Null
-          $arguments = @('release', 'create', $tag) + $assets + @(
-            '--repo', $env:GITHUB_REPOSITORY, '--verify-tag',
-            '--title', "Pressroom $env:RELEASE_VERSION", '--notes-file', $notesPath, '--generate-notes'
-          )
-          if ($env:RELEASE_DRAFT -eq 'true') { $arguments += '--draft' }
-          if ($env:RELEASE_PRERELEASE -eq 'true' -or $env:RELEASE_VERSION.Contains('-')) { $arguments += '--prerelease' }
-          gh @arguments
-          if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed. The verified assets remain in this workflow run.' }
-          "Created release $tag from commit $env:GITHUB_SHA with Windows and Linux installers, client NuGet packages, symbols, and SHA-256 files." >> $env:GITHUB_STEP_SUMMARY
+          if ($env:RELEASE_NOTES) { $notes = "$env:RELEASE_NOTES`n`n$notes" }
+          "notes<<END_OF_NOTES`n$notes`nEND_OF_NOTES" >> $env:GITHUB_OUTPUT
+
+      # A dry run stops here: its installers and client package are the artifacts the earlier jobs kept.
+      - name: Publish
+        if: ${{ !inputs.dry-run }}
+        uses: auroris/AurorisNet.Build/actions/publish@main
+        with:
+          versions: ${{ needs.version.outputs.version }}
+          packages: artifacts/release
+          assets: |
+            artifacts/release/*.zip
+            artifacts/release/*.tar.gz
+            artifacts/release/*.sha256
+            artifacts/release/*.spdx.json
+          notes: ${{ steps.notes.outputs.notes }}

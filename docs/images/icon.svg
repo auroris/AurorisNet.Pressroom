@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="26" fill="#1e293b"/>
+  <!-- A printed page with three lines of text. -->
+  <rect x="34" y="22" width="60" height="84" rx="7" fill="#fff"/>
+  <g stroke="#1e293b" stroke-width="7" stroke-linecap="round">
+    <path d="M48 46 H80"/>
+    <path d="M48 64 H80"/>
+    <path d="M48 82 H66"/>
+  </g>
+</svg>
