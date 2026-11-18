@@ -12,7 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="../Pressroom.Contracts/Pressroom.Contracts.csproj" />
     <ProjectReference Include="../Pressroom.Rendering/Pressroom.Rendering.csproj" />
-    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="11.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
   <ItemGroup>
