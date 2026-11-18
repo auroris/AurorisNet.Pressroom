@@ -1,170 +1,171 @@
-# Windows / IIS release acceptance
+# Windows and IIS release acceptance
 
-Qualify a release by completing this record against the published files on the
-target IIS server. Check its prerequisites, application-pool permissions and
-rendering behavior in that environment. For
-Windows containers, use the lighter checks in [Containers](container.md); this
-checklist is for direct IIS hosting and physical printing.
+Qualify a release on the target IIS server by working through this checklist with the published
+files. The build checks each release on the build machine only, so the server's prerequisites,
+the application pool's permissions and the rendering there are checked here. The checklist covers
+direct IIS hosting and physical printing. For a container, use
+[Check a running container](container.md#check-a-running-container).
 
 ## Record the environment
 
-Record the release manifest, Windows Server edition and build, .NET, ASP.NET Core
-and Hosting Bundle versions, IIS configuration, pool identity, machine-installed
-Visual C++ runtime inventory, Media Foundation feature state, browser version,
-font manifest, and configured rendering limits. Preserve the exact artifact and
-this result with the release.
+Record these with the result, and keep the exact release archive with them:
 
-Start with a supported clean Windows Server baseline containing IIS and the .NET
-10 Hosting Bundle. Media Foundation must be absent for the standard qualification.
-Do not add another machine-wide Visual C++ runtime to make the test pass without
-first recording the exact missing dependency. The Hosting Bundle's own baseline
-components are part of the stated prerequisite; document them separately.
+- the release manifest, the browser version and the font manifest;
+- the Windows Server edition and build;
+- the .NET, ASP.NET Core and Hosting Bundle versions;
+- the IIS configuration and the pool identity;
+- the Visual C++ runtimes installed on the machine, and whether the Media Foundation feature is
+  installed;
+- the configured rendering limits.
 
-Use a fresh location with no developer Playwright browser cache and no dependency
-validation markers. Do not provide Node, npm, the .NET SDK, PowerShell 7, or
-network download access to the application. Grant the real pool identity read and
-execute access to the release and write access only to its external runtime
-directories. Keep normal Playwright validation and `ChromiumSandbox=true` enabled.
+Prepare the server as follows:
+
+- Start from a clean, supported Windows Server with IIS and the .NET 10 Hosting Bundle. Record the
+  components that the Hosting Bundle itself installs separately from the rest.
+- Leave Media Foundation out for the standard qualification.
+- If the test fails for a missing dependency, record exactly which one before you install a
+  machine-wide Visual C++ runtime to make it pass.
+- Use a location that has no Playwright browser cache of a developer and no
+  dependency-validation markers.
+- Give the application no Node, npm, .NET SDK, PowerShell 7 or download access.
+- Grant the real pool identity read and execute on the release, and write on its external state
+  folders only.
+- Leave Playwright's dependency validation on and `Render:ChromiumSandbox` `true`.
 
 ## Cold start and published payload
 
-- Start the actual IIS application and confirm `/v1/health` becomes 200 after
-  warm-up. Confirm that `/v1/info` matches the expected release, browser, and font
-  versions.
-- Submit `samples/orders-bilingual.request.json` through the real site and verify
-  a PDF response, two pages, Letter portrait dimensions, page numbers, vector
-  graphic, bold and italic faces, French accents and ligatures, outlines, and
-  requested tagging. Inspect the generated PDF visually and with your PDF
-  inspection tool.
-- Verify `application/pdf` and a `Content-Disposition: attachment` header with a
-  safe filename, including a Unicode filename. The calling application sets its
-  own browser response headers to choose display or download. Requests containing
-  the removed `disposition` property must return 400.
-- Verify a caller-embedded image and font in addition to the packaged Noto Sans
-  faces. Verify generic header and footer typography independently; page CSS and
-  fonts do not automatically apply to Chromium's header and footer templates, and
-  custom embedded header or footer fonts are not supported.
-- Restart the pool and repeat. Confirm owned browser and driver processes from the
-  old worker exit; unrelated machine browsers must remain untouched.
-- Confirm Windows Job Object assignment works under the real IIS identity,
-  including any nesting imposed by IIS. The renderer assigns its private Node
-  process before browser launch and tracks its descendants in that job; inability
-  to establish that ownership must fail startup. Exercise shutdown and crash
-  cleanup and confirm the owned job reaches zero active processes.
-- Confirm the release directory is not writable to the pool and that startup
-  still succeeds without writing a dependency-validation marker there.
+- Start the IIS application and confirm that `/v1/health` returns 200 after warm-up, and that
+  `/v1/info` reports the expected release, browser and font versions.
+- Send the sample request
+  [`orders-bilingual.request.json`](https://github.com/auroris/AurorisNet.Pressroom/blob/main/samples/orders-bilingual.request.json)
+  through the site. Verify a PDF response with two pages, Letter portrait dimensions, page
+  numbers, the vector graphic, bold and italic faces, French accents and ligatures, an outline,
+  and tags. Look at the PDF, and inspect it with your PDF tool.
+- Verify `application/pdf` and a `Content-Disposition: attachment` header with a safe file name,
+  also for a Unicode file name. A request with a property the API does not define, such as
+  `disposition`, must return 400.
+- Verify an image and a font that the caller embeds, beside the packaged Noto Sans faces.
+- Verify header and footer text separately, with a generic font family. The page's CSS and fonts
+  do not reach Chromium's header and footer templates, and fonts embedded in a template are not
+  supported.
+- Restart the pool and repeat. Confirm that the browser and driver processes of the old worker
+  exit, and that other browsers on the machine are untouched.
+- Confirm that the Windows Job Object works under the real IIS identity, including any nesting
+  that IIS adds. Pressroom puts its private Node process in a job before the browser starts and
+  keeps every descendant in it. If it cannot, startup must fail. Exercise shutdown and a browser
+  crash, and confirm that the job ends with no active process.
+- Confirm that the pool identity cannot write to the release folder, and that startup still
+  succeeds without writing a dependency-validation marker there.
 
-## Real IIS authentication
+## Authentication through IIS
 
-Enable IIS Anonymous Authentication and disable Windows Authentication. Configure
-each access mode in the external JSON file and restart between modes. Inspect
-status codes and `WWW-Authenticate` headers.
+Enable IIS Anonymous Authentication and disable Windows Authentication. Set each access mode in
+the external JSON file, and restart between modes. Check the status codes and the
+`WWW-Authenticate` headers.
 
 | Mode and request | Expected |
 |---|---|
-| `ApiKey`: valid configured key | 200 on `/v1/info` and successful render |
-| `ApiKey`: missing key | 401, including callers with Windows credentials |
-| Either mode: invalid, empty, duplicate, or oversized key | 401; no Negotiate/NTLM challenge |
-| `Anonymous`: no key | Successful render, `/v1/info`, and OpenAPI access |
+| `ApiKey`: valid configured key | 200 on `/v1/info`, and a successful render |
+| `ApiKey`: no key | 401, also for a caller with Windows credentials |
+| Either mode: invalid, empty, repeated or oversized key | 401, with no Negotiate or NTLM challenge |
+| `Anonymous`: no key | A successful render, `/v1/info` and the OpenAPI document |
 | `Anonymous`: valid configured key | Success |
 | `ApiKey`: no keys configured | Startup fails with a configuration error |
-| Either mode: key with omitted or false `AllowJavaScript`, and omitted or true request `javaScript` | Static render; document scripts do not execute |
-| `Anonymous`: omitted or true `javaScript` without a key | Static render; document scripts do not execute |
-| Either mode: key with `AllowJavaScript: true`, and omitted or true request `javaScript` | Chart scripts and readiness expression execute |
-| Either mode: opted-in configured key plus `javaScript: false` | Static render; document scripts do not execute |
-| Invalid key settings or duplicate configured secrets | Startup fails with a configuration error |
+| Invalid key settings, or two keys with one secret | Startup fails with a configuration error |
+| Either mode: key without `AllowJavaScript`, request `javaScript` omitted or `true` | Static render. Document scripts do not run. |
+| `Anonymous`: no key, request `javaScript` omitted or `true` | Static render. Document scripts do not run. |
+| Either mode: key with `AllowJavaScript: true`, request `javaScript` omitted or `true` | Chart scripts and the readiness expression run |
+| Either mode: key with `AllowJavaScript: true`, request `javaScript: false` | Static render. Document scripts do not run. |
 
-Verify `/v1/health` remains anonymous in both modes. Verify `/v1/info` and OpenAPI
-require a valid key in API-key mode. Use a document with inline scripts,
-data-backed scripts, event handlers and child frames to confirm they do not
-execute when JavaScript is disabled. Check that static text, embedded images, CSS
-and packaged fonts still render. A caller readiness function with JavaScript
-effectively disabled must return 400, including when the request says
-`javaScript: true` but the key lacks permission.
+Also verify:
 
-Change a rendering limit and a valid key in the external JSON file, restart, and
-confirm both changes take effect. Check that the application reads the file named
-by `ConfigurationFile`, fails startup for an explicitly selected missing file,
-and does not take application-setting overrides from environment variables.
+- `/v1/health` is anonymous in both modes, and `/v1/info` and the OpenAPI document need a valid
+  key in API-key mode.
+- With scripts off, a document with inline scripts, `data:` scripts, event handlers and child
+  frames runs none of them, while its static text, embedded images, CSS and packaged fonts
+  render.
+- A readiness function with scripts off returns 400, also when the request says
+  `javaScript: true` and the key lacks the permission.
+- After you change a rendering limit and a key in the external file and restart, both changes
+  apply.
+- The application reads the file that `ConfigurationFile` names, fails to start when that file is
+  missing, and takes no application setting from an environment variable.
 
 ## Printer output
 
-For a desktop test, configure `Printing:SumatraPdfPath` to an installed or portable
-SumatraPDF executable and add `Printing:Printers:pdf-test` with the value
-`Microsoft Print to PDF`. Start Pressroom interactively with an API key. Submit
-`samples/orders-bilingual.request.json` with `"printer": "pdf-test"`, allowing
-enough processing time to complete the printer's **Save Print Output As** dialog.
-Save to an absolute path outside the temporary job directory. Expect 202 JSON,
-`status: submitted`, a correlation `jobId`, `printer: pdf-test`, and `pageCount: 2`.
-Inspect both pages of the saved output. Use the returned job ID to correlate the
-Pressroom submission and the Windows queue to check printing progress.
+**Desktop test.** Set `Printing:SumatraPdfPath` to an installed or portable SumatraPDF, and add
+`Printing:Printers:pdf-test` with the value `Microsoft Print to PDF`. Start Pressroom from a
+console, with an API key. Send the sample request with `"printer": "pdf-test"` and a timeout long
+enough to complete the printer's **Save Print Output As** dialog. Save to an absolute path
+outside the temporary job folder. Expect 202 with JSON: `status: submitted`, a `jobId`,
+`printer: pdf-test` and `pageCount: 2`. Inspect both pages of the saved file. Use the `jobId` to
+match Pressroom's log line with the Windows queue.
 
-For production acceptance, repeat against an actual configured printer under the
-dedicated IIS identity, which needs print permission and access to SumatraPDF.
-Verify unavailable queues, denied permissions, cancellation, and request timeout;
-check that the helper exits and temporary input PDFs are removed. Queued pages may
-still print after a cancellation: inspect the Windows queue before retrying.
-Microsoft Print to PDF normally prompts for a filename and is unsuitable for
-unattended IIS use. Verify `GET /v1/printers` and print requests require a valid key
-even in anonymous mode, and that PDF-only requests continue to work.
+**Production.** Repeat with a real printer under the dedicated IIS identity, which needs print
+permission and access to SumatraPDF. `Microsoft Print to PDF` asks for a file name, so it does not
+suit IIS.
 
-## Limits, cancellation, and resources
+- Verify an unavailable queue, denied permission, a cancelled request and a request timeout.
+  After each, the print command has exited and the temporary PDF is gone.
+- Pages already queued can still print after a cancellation. Look at the Windows queue before you
+  send again.
+- Verify that `GET /v1/printers` and print requests need a valid key in anonymous mode too, and
+  that PDF requests still work.
 
-Exercise bodies near the 25 MiB application ceiling and above the 32 MiB host
-ceiling. Measure the full UTF-8 JSON body, including escaped HTML and templates.
-Application-level oversized bodies should return 413 problem details; an IIS
-outer-limit rejection may use a native IIS response.
+## Limits, cancellation and resources
 
-Fill active and waiting capacity, verify 429 and `Retry-After`, and confirm
-`/v1/health` stays ready during queue saturation. Cancel queued and active requests,
-including an expensive script or print operation using an opted-in key. Confirm
-capacity is actually released and follow-up renders complete. Readiness failures
-should return 422; the overall deadline should return 504 and terminate the
-request's browser work.
+- **Body size.** Send bodies near the 25 MiB application limit and above the 32 MiB host limit.
+  Measure the whole UTF-8 JSON body, with the escaped HTML and templates. Over the application
+  limit, expect 413 with problem details. Over the host limit, IIS may answer with its own
+  response.
+- **Capacity.** Fill the active and waiting capacity. Verify 429 with `Retry-After`, and that
+  `/v1/health` stays 200.
+- **Cancellation.** Cancel waiting and active requests, including an expensive script and a print
+  request with a key that allows scripts. Confirm that the capacity comes back and that later
+  renders complete.
+- **Failures.** A failed readiness condition returns 422. A passed deadline returns 504 and ends
+  the request's work in the browser.
+- **Blocked resources.** From test documents, try HTTP and HTTPS, local files, frames and popups,
+  CSS imports, fetch and XHR, WebSockets and service workers. Send the script-based probes with a
+  key that allows scripts, so they run. Confirm that each is blocked, and that the logs hold no
+  URL, document text, page error, console text, PDF content or key.
 
-Try HTTP(S), local-file, frame and popup, CSS, fetch and XHR, WebSocket, and
-service-worker resource access from controlled fixture documents. Run script-based
-probes with an opted-in key so the attempts actually execute. Confirm the intended
-blocking and confirm logs contain no raw URLs, document text, page errors or
-console text, PDF content, or keys. A strict no-egress requirement also needs an
-independently enforced network policy.
+A requirement that the server makes no outbound connection at all also needs a network policy
+enforced outside Pressroom.
 
-## Recycle, update, rollback, and soak
+## Recycle, update, rollback and soak
 
-Perform at least 1,000 representative successful renders at configured concurrency,
-crossing planned browser-recycle thresholds. Record errors and retries, memory
-peaks, process counts, response times, and post-idle memory. Include slow clients
-so buffered PDF response admission is exercised. Confirm bounded memory and process
-growth alongside total throughput.
+- **Soak.** Run at least 1,000 representative renders at the configured concurrency, past the
+  point where Pressroom replaces the browser. Record errors and retries, peak memory, process
+  counts, response times and memory after idling. Include slow clients, so that responses still
+  being downloaded count against admission. Confirm that memory and process counts stay bounded.
+- **Recycle.** Recycle the pool during traffic, and verify readiness, recovery and cleanup. Test a
+  browser crash and its replacement. Allow memory for overlapped worker processes, or choose
+  recycling without overlap.
+- **Update and rollback.** Deploy an update with your normal procedure, then restore the whole
+  previous release the same way. After each, verify readiness, the version, the access mode and a
+  PDF. Settings, logs and temporary state stay outside the site folder. Do not count a partial
+  copy or a failed warm-up as a deployment.
 
-Trigger an IIS recycle during traffic and verify readiness, recovery, and cleanup.
-Test an owned-browser crash and supervised replacement. Budget for IIS overlapped
-worker processes or explicitly choose non-overlapped recycling.
+## Asynchronous jobs, when enabled
 
-Deploy an update using your normal procedure, then restore the entire previous
-release the same way. Verify readiness, version identity, the configured access
-mode, and a PDF after each operation. Keep configuration, logs, and temporary
-state outside the replaceable site directory. A partial file copy or warm-up
-failure must not be treated as a successful deployment.
-
-## Optional asynchronous jobs
-
-- Submit a batch of several hundred documents while measuring concurrent
-  synchronous p95 latency; target at most twice idle latency with no additional
-  synchronous 429s.
-- Restart with queued and active jobs. Queued work resumes; the interrupted
-  render fails as retryable. Printing interruption needs Windows spooler review.
-- Verify two keys cannot list, read, download, or delete each other's jobs.
-- Exercise global and per-key queues, disk quota, cancellation, expiry and
-  delete-on-download. Expired content disappears within two sweeper intervals;
-  an active download retains its open file until its stream closes.
-- Inspect protected service-SID ACLs, metadata-only logs, and the instance lock.
-- Disable overlapped IIS recycling for local storage; test stop and start updates
-  and rollback without replacing the jobs directory.
+- Submit a batch of several hundred documents while you measure the 95th-percentile latency of
+  synchronous requests. Aim for at most twice the idle latency, with no added 429 on synchronous
+  requests.
+- Restart with queued and active jobs. Queued jobs resume, and the interrupted render fails as
+  retryable. After an interrupted print job, check the Windows spooler.
+- Verify that two keys cannot list, read, download or delete each other's jobs.
+- Exercise the global queue limit and the limit of one key, the storage budget, cancellation,
+  expiry and deletion on download. Expired content is gone within two minutes. A result that is
+  being downloaded stays until the download ends.
+- Inspect the access lists on the job folders, which name the service identity only. Confirm that
+  the logs hold metadata only and that a second instance cannot open the store.
+- Disable overlapped recycling. Test updates and rollback by stopping and starting, without
+  replacing the jobs folder.
 
 ## Result
 
-Record **passed**, **failed**, or **not run** for each area, with the exact artifact,
-machine inventory, measurements, and outstanding limitations. Qualification requires
-the target-server checks above with host validation enabled. Requalify after
-changing the browser or native runtime payload.
+Record **passed**, **failed** or **not run** for each section, with the exact release archive, the
+machine inventory, the measurements and the limits that remain. A release is qualified when these
+checks pass on the target server with Playwright's dependency validation on. Qualify again after
+a change of browser or of native runtime components.

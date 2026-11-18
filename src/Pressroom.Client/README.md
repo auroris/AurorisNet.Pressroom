@@ -1,41 +1,26 @@
 # AurorisNet.Pressroom.Client
 
-Pressroom is a self-hosted HTML-to-PDF service for Windows, IIS, Linux, and
-containers. Send a complete HTML document to its HTTP API to receive a PDF or
-submit it to a configured Windows or Linux printer.
+The .NET client for [Pressroom](https://github.com/auroris/AurorisNet.Pressroom), a self-hosted
+service that turns a complete HTML document into a PDF or sends it to a configured printer.
 
-**This package is the .NET client for Pressroom.** It lets .NET 8 and .NET 10
-applications call a running Pressroom server. It includes the `Pressroom.Client`
-and `Pressroom.Contracts` assemblies, with no browser dependencies. It does not
-include the server or render PDFs locally.
+The package calls a running Pressroom server over HTTP from a .NET 8 or .NET 10 application. It
+holds the `Pressroom.Client` and `Pressroom.Contracts` assemblies and depends on no other package.
+Rendering happens on the server: set one up first with the
+[getting started guide](https://github.com/auroris/AurorisNet.Pressroom/blob/main/docs/getting-started.md),
+from a [server release](https://github.com/auroris/AurorisNet.Pressroom/releases/latest).
 
-**Looking for the server?** Visit the
-[Pressroom GitHub repository](https://github.com/auroris/Pressroom) for the full
-project and deployment guides, or
-[download a server release](https://github.com/auroris/Pressroom/releases/latest).
-The repository covers Windows/IIS, Linux, and container deployments. Set up a
-server before using this client; the
-[getting started guide](https://github.com/auroris/Pressroom/blob/main/docs/getting-started.md)
-walks through configuration and your first render.
+## Install
 
-## Installation
-
-For versions published to NuGet.org:
-
-```sh
-dotnet add package AurorisNet.Pressroom.Client --version <version>
+```shell
+dotnet add package AurorisNet.Pressroom.Client
 ```
 
-For builds distributed through GitHub, download and extract `nuget-packages` from
-the **Packages** workflow, or download `AurorisNet.Pressroom.Client.<version>.nupkg`
-from a release into a local feed directory. Add `--source ./packages` to the
-command above. A separate Contracts package is not needed. When migrating from
-the old packages, remove the `Pressroom.Client` and `Pressroom.Contracts` package
-references; the C# namespaces stay the same.
+Each [GitHub release](https://github.com/auroris/AurorisNet.Pressroom/releases) also holds the
+`.nupkg` file, for a local feed.
 
-## Usage
+## Use
 
-Use your server's URL and API key in your application:
+Give the client an `HttpClient` with your server's URL, ending in a slash, and your API key:
 
 ```csharp
 using Pressroom.Client;
@@ -52,16 +37,24 @@ var pdf = await pressroom.RenderAsync(new RenderRequest
 await File.WriteAllBytesAsync(pdf.FileName, pdf.Bytes);
 ```
 
-Reuse a caller-owned `HttpClient` or register a typed client with `AddHttpClient`.
-`RenderStreamAsync` returns a disposable `PdfRenderResult` for streaming; `PrintAsync`
-submits to a configured Windows or Linux printer. Errors include HTTP status, problem
-details, and `Retry-After`. Retry policy belongs to the caller.
+Reuse one `HttpClient`, or register a typed client with `AddHttpClient<PressroomClient>`.
 
-With jobs enabled on the server, use `SubmitAsync` to create a durable job,
-`GetJobAsync` to read its status, and `WaitAsync` to wait for completion.
-`DownloadAsync` and `DownloadStreamAsync` collect results; `CancelAsync` cancels work
-or removes a result. `RenderManyAsync` bounds batch submission and yields PDFs or
-typed failures.
+| Method | What it does |
+|---|---|
+| `RenderAsync` | Returns the PDF in memory with its file name, page count and render time. |
+| `RenderStreamAsync` | Returns a `PdfRenderResult` that streams the PDF. Dispose it after copying. |
+| `PrintAsync` | Sends the document to a configured Windows or Linux printer and returns the receipt. |
+| `SubmitAsync`, `GetJobAsync`, `WaitAsync` | Create a job on a server with jobs enabled, read its state, and wait for it to finish. |
+| `DownloadAsync`, `DownloadStreamAsync`, `CancelAsync` | Fetch a job's PDF, and cancel a job or delete its result. |
+| `RenderManyAsync` | Runs a batch through jobs with a limit on jobs in progress, and yields a PDF or an error for each request. |
+| `IsReadyAsync` | Reads the server's health route. |
 
-See the [client guide](https://github.com/auroris/Pressroom/blob/main/docs/development/client.md)
-for configuration, validation, streaming, and printing.
+The client validates a request before it sends it and throws `ArgumentException` for invalid
+values. An error response throws `PressroomException` with the HTTP status, the problem details
+and the `Retry-After` delay. The client never retries a failed request: retries belong to your
+application.
+
+The [client guide](https://github.com/auroris/AurorisNet.Pressroom/blob/main/docs/development/client.md)
+covers streaming, printing, batches and error handling, and the
+[API reference](https://github.com/auroris/AurorisNet.Pressroom/blob/main/docs/development/api.md)
+lists every request option.

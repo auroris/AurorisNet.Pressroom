@@ -1,62 +1,59 @@
 # Authoring documents
 
-Pressroom lays out one complete HTML document with Chromium's print engine. Use
-HTML and CSS to control its content and pagination, and the [request options](api.md)
-to set paper geometry, headers and footers.
+Pressroom lays out one complete HTML document with Chromium's print engine. This page explains
+how to write that document: its resources, fonts, page breaks, headers and footers, and scripts.
+The [request options](api.md#post-v1render) set the paper.
 
 ## Documents are self-contained
 
-A request carries the complete document as a string, with its resources embedded:
+A request carries the whole document as one string, with its resources inside it:
 
 - **Styles** go in `<style>` elements or `style` attributes.
-- **Images, fonts, and other resources** must be `data:` URLs. Network (`http:`,
-  `https:`), local-file, and `blob:` resources are blocked before the document is
-  parsed, including inside nested frames and `srcdoc` documents.
-- **`<base>` elements are rejected** with a 400 response, in the document and in
-  header or footer templates, so relative URLs cannot create an alternative fetch
-  path.
-- **Forms, popups, downloads, workers, service workers, and origin-backed storage**
-  are disabled. Scripts are off unless the caller's API key permits them (see
-  [JavaScript and readiness](#javascript-and-readiness)).
+- **Images, fonts and other resources** must be `data:` URLs. Pressroom blocks network
+  (`http:`, `https:`), local-file and `blob:` resources, also inside nested frames and `srcdoc`
+  documents.
+- **A `<base>` element** in the document, or in a header or footer template, gets the request
+  rejected with 400.
+- **Forms, popups, downloads, workers, service workers and storage** are disabled. Scripts run
+  only when the caller's API key allows them: see
+  [JavaScript and readiness](#javascript-and-readiness).
 
-If an image is missing, check that its source is a `data:` URL. The server logs a
-count of blocked resources for each render to help diagnose incomplete output.
+When an image is missing from the PDF, check that its source is a `data:` URL. The server logs
+how many resources it blocked in each render.
 
-Inline SVG works well for logos, marks, and charts, and keeps documents small. The
-bundled [sample document](../../samples/orders-bilingual.html) uses an inline SVG mark.
+Inline SVG suits logos, marks and charts, and keeps a document small. The
+[sample document](../../samples/orders-bilingual.html) uses an inline SVG mark.
 
 ## Fonts
 
-The release packages **Noto Sans** in regular, bold, italic, and bold italic. These
-faces are injected into every document automatically. Select them in CSS:
+A release packages **Noto Sans** in regular, bold, italic and bold italic, and Pressroom adds
+these faces to every document. Select them in CSS:
 
 ```css
 :root { font-family: 'Noto Sans', sans-serif; }
 ```
 
-Any other font must be embedded by the document as a `data:`-backed `@font-face`
-rule. Fonts installed on the Windows server may also resolve, but they are a
-machine-specific choice that needs separate qualification. `GET /v1/info` lists
-the guaranteed packaged faces.
+Embed any other font in the document, as an `@font-face` rule with a `data:` source. A font
+installed on the server can also resolve, but then the output depends on that machine. `GET
+/v1/info` lists the packaged faces.
 
-Pressroom waits for the document's fonts to be ready before printing, within the
-render deadline.
+Pressroom waits until the document's fonts are ready before it prints, within the render's
+deadline.
 
 ## Page size, margins, and breaks
 
-Set paper geometry through the request options:
+Set the paper through the request options:
 
-- `options.pageSize` selects `Letter` (the default), `Legal`, `Tabloid`, `A3`, `A4`,
-  `A5`, or custom dimensions such as `{ "width": "8.5in", "height": "11in" }`.
-  `options.landscape` rotates it.
-- `options.margins` default to 20 mm top and bottom and 15 mm left and right.
-  Lengths accept `px`, `mm`, `cm`, and `in`, and the margins must leave a positive
-  printable area.
-- Set `options.preferCssPageSize` to `true` when the document's own `@page { size: … }`
-  rule should win over `pageSize`.
-- `options.scale` shrinks or enlarges the rendering between 0.1 and 2.
+- `options.pageSize` selects `Letter` (the default), `Legal`, `Tabloid`, `A3`, `A4`, `A5`, or
+  custom dimensions such as `{ "width": "8.5in", "height": "11in" }`. `options.landscape`
+  turns the page.
+- `options.margins` default to 20 mm at the top and bottom and 15 mm at the left and right. A
+  length is in `px`, `mm`, `cm` or `in`, and the margins must leave a printable area.
+- `options.preferCssPageSize` set to `true` lets the document's own `@page { size: … }` rule win
+  over `pageSize`.
+- `options.scale` shrinks or enlarges the rendering, from 0.1 to 2.
 
-Use the CSS fragmentation properties to control where pages break:
+Control page breaks with the CSS fragmentation properties:
 
 ```css
 h2 { break-after: avoid; }         /* keep a heading with what follows */
@@ -64,22 +61,20 @@ tr, figure { break-inside: avoid; } /* keep a row or figure on one page */
 .appendix { break-before: page; }   /* start a section on a new page */
 ```
 
-Chromium repeats `<thead>` on each page of a long table.
+Chromium repeats a table's `<thead>` on each page the table spans.
 
 ## Print and screen media
 
-Rendering uses print media by default, applying `@media print` rules. The sample
-document gives the page a tinted background on screen for previewing in a browser
-and a white background in print.
-Set `options.media` to `"screen"` to print a document exactly as a browser would
-display it. Background colours and images are printed by default; set
-`options.printBackground` to `false` to drop them.
+A render uses print media by default, so `@media print` rules apply. The sample document has a
+tinted background on screen, for previewing in a browser, and a white one in print. Set
+`options.media` to `"screen"` to print a document as a browser displays it. Background colors and
+images print by default. Set `options.printBackground` to `false` to leave them out.
 
 ## Headers and footers
 
-Supply running headers and footers as separate HTML templates in the request.
-The defaults leave the header blank and print "Page N / M"
-at the bottom right in 10px text with 20px of right padding:
+Running headers and footers are separate HTML templates in the request. By default the header is
+empty and the footer prints "Page N / M" at the bottom right, in 10px text with 20px of padding
+on the right:
 
 ```json
 "options": {
@@ -89,54 +84,48 @@ at the bottom right in 10px text with 20px of right padding:
 }
 ```
 
-Chromium fills elements with the classes `date`, `title`, `url`, `pageNumber`, and
-`totalPages`. Templates have their own rules:
+Chromium fills elements that have the classes `date`, `title`, `url`, `pageNumber` and
+`totalPages`. A template follows its own rules:
 
-- Give each template its own inline styles, including an explicit `font-size`,
-  and leave room for it in the top and bottom margins.
-- Scripts in templates are not executed, and resources other than `data:` are
-  blocked.
-- **Fonts in templates fall back to system fonts.** The packaged Noto Sans faces
-  reach the main document but not the header and footer area in the pinned
-  Chromium build, even with an embedded `@font-face` rule. Use a generic family
-  such as `sans-serif` and check the appearance on the Windows server.
+- **Styles.** Give each template its own inline styles, with an explicit `font-size`. The page's
+  CSS does not reach it. Leave room for it in the top and bottom margins.
+- **Scripts and resources.** Scripts in a template do not run, and resources other than `data:`
+  are blocked. A template that tries to load an external resource can fail the render.
+- **Fonts.** A template uses the server's system fonts. The packaged Noto Sans faces reach the
+  document body only, and an `@font-face` rule inside a template has no effect in the packaged
+  Chromium. Name a generic family such as `sans-serif`, and check the result on the server.
 
-Supply `options.headerTemplate` to enable a custom header. The default empty
-`<div></div>` suppresses Chromium's built-in header while leaving the footer
-enabled. Set `options.displayHeaderFooter` to `false` for documents that draw
-their own running elements.
+The default header, an empty `<div></div>`, replaces Chromium's built-in header and leaves the
+footer on. Supply `options.headerTemplate` for a header of your own. Set
+`options.displayHeaderFooter` to `false` for a document that draws its own running elements.
 
 ## Accessibility and navigation
 
-Pressroom requests a **tagged PDF** by default, so headings, lists, tables, and
-alternative text in well-structured HTML become structure in the PDF. It also
-builds a **document outline** (bookmarks) from the heading hierarchy. Both can be
-turned off with `options.tagged` and `options.outline`.
+Pressroom asks for a **tagged PDF** by default, so the headings, lists, tables and alternative
+text of well-structured HTML become structure in the PDF. It also builds a **document outline**
+(bookmarks) from the headings. `options.tagged` and `options.outline` turn these off.
 
-For accessible output, set `lang` on `<html>`, give the document a `<title>`, use
-semantic heading levels, add `alt` text, and mark table header cells with `<th scope>`.
-Validate the result against PDF/UA when conformance is required; tags alone do not
-establish conformance.
+For accessible output, set `lang` on `<html>`, give the document a `<title>`, use heading levels
+in order, add `alt` text, and mark table header cells with `<th scope>`. Tags alone do not make a
+PDF conform to PDF/UA: validate the result when you need conformance.
 
 ## Locale and time zone
 
-`options.locale` (default `en-CA`) and `options.timeZone` (default
-`America/Edmonton`) set the browser's locale and time zone for the render. They
-affect `Intl` formatting and `Date` behaviour in documents that run scripts, and
-the `date` substitution in header and footer templates. The locale must be one .NET
-recognises; the time zone must be an IANA identifier.
+`options.locale` (default `en-CA`) and `options.timeZone` (default `America/Edmonton`) set the
+browser's locale and time zone for the render. They change `Intl` formatting and `Date` in
+documents that run scripts, and the `date` value in header and footer templates. The locale must
+be a culture name that .NET knows, and the time zone an IANA identifier.
 
 ## JavaScript and readiness
 
-Scripts are disabled unless the calling application's API key carries
-`AllowJavaScript: true` (see [Configuration](../configuration.md#javascript-permission)).
-When the key permits scripts, the document may run inline and `data:`-backed
-scripts, which is how chart libraries and client-side templating can be used. The
-request can opt out for an individual render with `"options": { "javaScript": false }`
-but can never grant permission the key lacks.
+Scripts run only when the calling application's API key has `AllowJavaScript: true`: see
+[Configuration](../configuration.md#javascript-permission). The document can then run inline
+scripts and scripts from `data:` URLs, which is how chart libraries and client-side templates
+work. A request turns scripts off for one render with `"options": { "javaScript": false }`. It
+cannot turn them on for a key that lacks the permission.
 
-Pressroom prints static HTML once the document and its fonts have loaded.
-A document that draws asynchronously can tell Pressroom when it is ready:
+Pressroom prints once the document has loaded and its fonts are ready. A document that draws
+later can tell Pressroom when it is ready:
 
 ```json
 "options": {
@@ -149,32 +138,31 @@ A document that draws asynchronously can tell Pressroom when it is ready:
 }
 ```
 
-- `selector` waits for an element to exist.
-- `function` waits for a JavaScript expression to become truthy; it requires
-  effective JavaScript and returns 400 otherwise.
-- `delayMs` adds a fixed pause after the other conditions, inside the same budget.
-- `timeoutMs` bounds all of them. A condition that does not complete in time fails
-  the render with 422.
+- `selector` waits until a matching element is visible.
+- `function` waits until a JavaScript expression is truthy. It needs scripts to be on, or the
+  request gets 400.
+- `delayMs` adds a fixed pause after the other conditions.
+- `timeoutMs` is the time for all three together. When it runs out, the render fails with 422.
 
-All readiness waiting happens within the request's overall deadline.
+The readiness wait is part of the request's processing deadline. A script error in the page also
+fails the render with 422.
 
 ## The sample document
 
-[`samples/orders-bilingual.html`](../../samples/orders-bilingual.html) is a compact
-template for the techniques above: Noto Sans in all four styles, a `@page` rule,
-inline SVG, a table with `break-inside: avoid` rows, a `break-before: page`
-section, print and screen media rules, and English and French text. Its companion
-[`orders-bilingual.request.json`](../../samples/orders-bilingual.request.json) is
-ready to submit and returns PDF bytes to the calling application.
+[`samples/orders-bilingual.html`](../../samples/orders-bilingual.html) shows these techniques in
+one short template: Noto Sans in all four styles, a `@page` rule, inline SVG, a table whose rows
+have `break-inside: avoid`, a section with `break-before: page`, print and screen media rules, and
+English and French text. Its companion
+[`orders-bilingual.request.json`](../../samples/orders-bilingual.request.json) is ready to send.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
-| Image or icon missing | Referenced by URL instead of embedded as `data:` |
-| Text in a system font instead of your font | Font not embedded as a `data:` `@font-face`; or it is in a header or footer template |
-| Chart area empty | Scripts disabled for the key, or printed before the chart finished drawing; opt the key in and add a readiness condition |
-| 400 with `options.readiness.function` | JavaScript is effectively disabled for this request |
-| 422 | A readiness condition timed out or page execution raised an error |
-| A page splits a row or figure | Add `break-inside: avoid` |
-| Headers overlap content | Increase the top or bottom margin |
+| An image or icon is missing | It is referenced by URL and not embedded as `data:`. |
+| Text appears in a system font | The font is not embedded as an `@font-face` rule with a `data:` source, or the text is in a header or footer template. |
+| A chart area is empty | Scripts are off for the key, or the page printed before the chart was drawn. Give the key `AllowJavaScript` and add a readiness condition. |
+| 400 for `options.readiness.function` | Scripts are off for this request. |
+| 422 | A readiness condition ran out of time, the page raised a script error, or a template tried to load an external resource. |
+| A row or figure is split across pages | Add `break-inside: avoid`. |
+| A header overlaps the content | Increase the top or bottom margin. |

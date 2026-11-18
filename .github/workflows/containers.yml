@@ -56,7 +56,9 @@ jobs:
           # Container images float to the newest stable Playwright on purpose; installers stay pinned.
           $playwright = ./build/Resolve-PlaywrightVersion.ps1 -Version latest
           "playwright=$playwright" >> $env:GITHUB_OUTPUT
-          "image=ghcr.io/$($env:GITHUB_REPOSITORY.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          # The image keeps the name pressroom, which the Compose and Kubernetes examples and the Release workflow use, whatever
+          # the repository is called.
+          "image=ghcr.io/$($env:GITHUB_REPOSITORY_OWNER.ToLowerInvariant())/pressroom" >> $env:GITHUB_OUTPUT
           "Selected Playwright $playwright for this run; the matching driver and Chromium must pass verification." >> $env:GITHUB_STEP_SUMMARY
 
   linux:

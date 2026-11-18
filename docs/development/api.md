@@ -1,37 +1,26 @@
 # API reference
 
-Pressroom exposes a small HTTP API under `/v1`. All requests and responses are
-UTF-8; request bodies are uncompressed `application/json`. The live OpenAPI
-document at `/openapi/v1.json` describes the same contract.
+Pressroom has a small HTTP API under `/v1`. This page lists the routes, the request options, the
+responses and the status codes. A running service publishes the same contract as an OpenAPI
+document at `/openapi/v1.json`.
 
-Pressroom returns PDF bytes and metadata to the calling application. The
-application chooses whether its browser response displays or downloads the PDF;
-see [Returning the PDF to a browser](client.md#returning-the-pdf-to-a-browser).
-
-### Upgrading callers that use disposition
-
-The `disposition` request property and job field have been removed, along with
-`PdfDisposition` and the .NET request/result `Disposition` properties. Remove
-the field from render and job submissions and update the `AurorisNet.Pressroom.Client`
-package (including contracts) together with the server. Requests that still send
-it return 400, even for `"inline"` or `"attachment"`. Move that choice into the application's browser
-response. Existing stored jobs remain readable; recovery ignores their legacy
-field without exposing it in job responses.
+Requests and responses are UTF-8. A request body is uncompressed `application/json`. Every
+response has `Cache-Control: no-store`.
 
 ## Endpoints
 
 | Endpoint | Access | Result |
 |---|---|---|
-| `POST /v1/render` | Configured access mode; API key required when `printer` is supplied | `application/pdf`, or a 202 JSON print receipt |
-| `GET /v1/health` | Always anonymous | `{"status":"ready"}` with 200, or `{"status":"unavailable"}` with 503 |
-| `GET /v1/info` | Configured access mode | Versions, limits, counters, page sizes, packaged fonts |
-| `GET /v1/printers` | API key required in every mode | Configured printer identifiers |
-| `GET /openapi/v1.json` | Configured access mode | OpenAPI contract |
-| `/v1/jobs` routes | Configured access mode; only when jobs are enabled | See [Asynchronous jobs](#asynchronous-jobs-opt-in) |
+| `POST /v1/render` | The configured access mode. An API key when `printer` is set. | `application/pdf`, or a 202 JSON print receipt |
+| `GET /v1/health` | Always anonymous | 200 `{"status":"ready"}`, or 503 `{"status":"unavailable"}` |
+| `GET /v1/info` | The configured access mode | Versions, limits, counters, page sizes and packaged fonts |
+| `GET /v1/printers` | An API key in every mode | The configured printer identifiers |
+| `GET /openapi/v1.json` | The configured access mode | The OpenAPI document |
+| `/v1/jobs` routes | The configured access mode. Present only when jobs are enabled. | See [Asynchronous jobs](#asynchronous-jobs-opt-in) |
 
-In API-key mode, send the secret in the `X-Api-Key` header. In anonymous mode the
-header may be omitted; a supplied invalid key is still rejected with 401. See
-[Configuration](../configuration.md#access-mode-and-api-keys).
+In API-key mode, send the secret in the `X-Api-Key` header. In anonymous mode the header may be
+left out, but a key that is sent must be valid, or the response is 401.
+[Configuration](../configuration.md#access-mode-and-api-keys) describes both modes.
 
 ## POST /v1/render
 
@@ -64,37 +53,37 @@ header may be omitted; a supplied invalid key is still rejected with 401. See
 }
 ```
 
-Only `html` is required. The values shown are the defaults. Property names are
-case-sensitive, unknown properties are rejected, numbers must be JSON numbers, and
-`options`, `margins`, and `readiness` may be omitted but not set to `null`.
+Only `html` is required, and the example shows the default of every other value. Property names
+are case-sensitive, a property the API does not define is rejected, and numbers must be JSON
+numbers. `options`, `margins` and `readiness` may be left out but cannot be `null`.
 
 | Field | Type | Default | Rules |
 |---|---|---|---|
-| `html` | string | required | A complete HTML document. `<base>` elements are rejected |
-| `fileName` | string | `document.pdf` | Suggested PDF filename returned to the application. Sanitized: path separators and control characters replaced, reserved Windows names prefixed, truncated to 120 characters, `.pdf` appended |
-| `printer` | string or null | `null` | A configured printer identifier; switches the response to a print receipt. See [Printing](../printing.md) |
-| `options.pageSize` | name or object | `Letter` (configurable) | `Letter`, `Legal`, `Tabloid`, `A3`, `A4`, `A5` (case-insensitive), or `{ "width": "8.5in", "height": "11in" }` |
-| `options.landscape` | boolean | `false` | Swaps the paper dimensions |
-| `options.margins` | object | 20 mm / 15 mm | Each of `top`, `right`, `bottom`, `left` is a length in `px`, `mm`, `cm`, or `in`, up to 200 inches. Margins must leave a positive printable area |
-| `options.preferCssPageSize` | boolean | `false` | Let the document's `@page` size override `pageSize` |
-| `options.printBackground` | boolean | `true` | Print background colours and images |
-| `options.scale` | number | `1` | 0.1 to 2 |
-| `options.displayHeaderFooter` | boolean | `true` | Render the header and footer templates |
-| `options.headerTemplate`, `options.footerTemplate` | string | blank header / right-aligned `Page N / M` footer | HTML with Chromium's `date`, `title`, `url`, `pageNumber`, `totalPages` classes. Own styles required; `<base>` rejected |
-| `options.tagged` | boolean | `true` | Request structural tagging |
-| `options.outline` | boolean | `true` | Build a document outline from headings |
-| `options.media` | `"print"` or `"screen"` | `print` | CSS media emulated during rendering |
-| `options.javaScript` | boolean | `true` | `false` disables scripts for this render. `true` cannot grant permission; the API key decides |
-| `options.locale` | string | `en-CA` | A .NET-recognised, non-invariant culture name, up to 64 characters |
-| `options.timeZone` | string | `America/Edmonton` | An IANA time zone identifier, up to 128 characters |
-| `options.readiness.selector` | string or null | `null` | Wait for a matching element; 1–4096 characters |
-| `options.readiness.function` | string or null | `null` | Wait for a truthy JavaScript expression; 1–16384 characters; requires effective JavaScript, otherwise 400 |
-| `options.readiness.delayMs` | integer | `0` | Extra pause after other conditions; must fit inside `readiness.timeoutMs` |
-| `options.readiness.timeoutMs` | integer | `5000` | Budget for all readiness conditions; 1 to the server maximum |
-| `options.timeoutMs` | integer or null | server default (30000) | Overall processing deadline, 100 to the server maximum (60000 by default) |
+| `html` | string | required | A complete HTML document. A `<base>` element is rejected. |
+| `fileName` | string | `document.pdf` | The file name Pressroom returns with the PDF. Sanitized: control characters and `< > : " / \ | ? *` become `_`, the name is cut to 120 characters, a reserved Windows name gets a `_` prefix, and `.pdf` is added when missing. |
+| `printer` | string or null | `null` | A configured printer identifier. The response is then a print receipt. See [Printing](../printing.md). |
+| `options.pageSize` | name or object | `Letter`, or the server's `Render:DefaultPageSize` | `Letter`, `Legal`, `Tabloid`, `A3`, `A4` or `A5`, in any letter case, or `{ "width": "8.5in", "height": "11in" }`. |
+| `options.landscape` | boolean | `false` | Swaps the paper's width and height. |
+| `options.margins` | object | 20 mm top and bottom, 15 mm left and right | `top`, `right`, `bottom` and `left` are lengths in `px`, `mm`, `cm` or `in`, up to 200 inches. They must leave a printable area. |
+| `options.preferCssPageSize` | boolean | `false` | Lets the document's `@page` size override `pageSize`. |
+| `options.printBackground` | boolean | `true` | Prints background colors and images. |
+| `options.scale` | number | `1` | 0.1 to 2. |
+| `options.displayHeaderFooter` | boolean | `true` | Prints the header and footer templates. |
+| `options.headerTemplate`, `options.footerTemplate` | string | An empty header, and a right-aligned `Page N / M` footer | HTML in which Chromium fills elements with the classes `date`, `title`, `url`, `pageNumber` and `totalPages`. A template needs its own styles. A `<base>` element is rejected. |
+| `options.tagged` | boolean | `true` | Asks for a tagged PDF. |
+| `options.outline` | boolean | `true` | Builds a document outline from the headings. |
+| `options.media` | `"print"` or `"screen"` | `print` | The CSS media type for the render. |
+| `options.javaScript` | boolean | `true` | `false` turns scripts off for this render. `true` runs scripts only when the API key allows them. |
+| `options.locale` | string | `en-CA` | A culture name that .NET knows, up to 64 characters. |
+| `options.timeZone` | string | `America/Edmonton` | An IANA time zone identifier, up to 128 characters. |
+| `options.readiness.selector` | string or null | `null` | Waits until an element that matches is visible. 1 to 4096 characters. |
+| `options.readiness.function` | string or null | `null` | Waits until a JavaScript expression is truthy. 1 to 16384 characters. Needs scripts to be on, or the response is 400. |
+| `options.readiness.delayMs` | integer | `0` | A pause after the other conditions. At most `readiness.timeoutMs`. |
+| `options.readiness.timeoutMs` | integer | `5000` | The time for all readiness conditions together, from 1 to the server maximum. |
+| `options.timeoutMs` | integer or null | The server's `Render:DefaultTimeoutMs`, 30000 | The processing deadline, from 100 to the server's `Render:MaxTimeoutMs`, 60000 by default. |
 
-Everything is validated before a browser context is opened. Validation failures
-return 400 with a field-keyed `errors` object.
+Pressroom validates the whole request before it opens a browser context. A request that fails
+validation gets 400 with an `errors` object keyed by field.
 
 ### PDF response
 
@@ -107,68 +96,72 @@ X-Render-Pages: 2
 X-Render-Duration-Ms: 1091
 ```
 
-`X-Render-Duration-Ms` measures processing from admission through page counting,
-including queue time. `Content-Disposition` always uses `attachment` to carry the
-sanitized filename to the caller. The application sets its own browser response
-headers to choose display or download.
+`X-Render-Pages` is the page count. `X-Render-Duration-Ms` is the processing time from admission
+to the counted PDF, including time spent waiting for a render slot. `Content-Disposition` is
+always `attachment`, and carries the sanitized file name to the calling application. The
+application decides whether its own response to a browser shows or downloads the PDF: see
+[Returning the PDF to a browser](client.md#returning-the-pdf-to-a-browser).
 
 ### Print receipt
 
-When `printer` is supplied and the caller holds a valid API key, a successful
-request returns **202 Accepted** with `application/json`:
+A request with `printer` and a valid API key returns **202 Accepted** with `application/json`
+once the print command has accepted the document:
 
 ```json
 { "jobId": "64e5b7e07c8e4bdb86521bed5cd54d4c", "printer": "shipping", "status": "submitted", "pageCount": 1 }
 ```
 
-`submitted` confirms acceptance by the print helper. Check printing progress in
-the Windows or CUPS queue. See [Printing](../printing.md).
+Follow the printing itself in the Windows or CUPS queue. [Printing](../printing.md) explains the
+receipt.
 
 ### Status codes
 
-Errors use `application/problem+json` with `title`, `detail`, and, for validation,
-an `errors` object keyed by field path.
+Errors are `application/problem+json` with `title`, `status`, `detail` and `requestId`. A
+validation error adds an `errors` object keyed by field path.
 
 | Status | Meaning | Notes |
 |---|---|---|
-| 200 | Rendered | PDF body and headers above |
-| 202 | Print job submitted | JSON receipt |
-| 400 | Invalid JSON, missing field, invalid option, `<base>` element, unknown printer, or a readiness function without JavaScript | `errors` names the fields |
-| 401 | Missing, invalid, empty, or duplicate `X-Api-Key` | Also for printing without a key |
-| 413 | Request body over the 25 MiB application limit or the 32 MiB host limit | Host rejections may not be JSON |
-| 415 | Body is not uncompressed UTF-8 `application/json` | |
-| 422 | A readiness condition failed or page execution raised an error | Bounded diagnostics, no page text in logs |
-| 429 | Render capacity exhausted | `Retry-After` header; readiness stays healthy |
-| 502 | Printer helper reported a submission failure | Printing only |
-| 503 | Renderer starting, restarting, or shutting down; or printer helper unavailable | `Retry-After` when a response can be sent |
-| 504 | Overall processing deadline expired | Pages may already have reached a print spooler |
+| 200 | Rendered | The PDF and the headers above |
+| 202 | Print job submitted | The JSON receipt |
+| 400 | Invalid JSON, a missing or unknown field, an invalid option, a `<base>` element, an unknown printer, or a readiness function with scripts off | `errors` names the fields |
+| 401 | The `X-Api-Key` header is missing in API-key mode, or is invalid, empty or repeated | Also a print request without a key |
+| 413 | The body is over the application limit, 25 MiB by default, or the host's 32 MiB limit | A rejection by IIS itself may not be JSON |
+| 415 | The body is not uncompressed UTF-8 `application/json` | |
+| 422 | A readiness condition was not met, the page raised a script error, or Chromium could not load or print the document | A fixed message, with no text from the page |
+| 429 | The render capacity is in use | `Retry-After: 1`. `/v1/health` stays 200. |
+| 502 | The print command reported a failure | Pages may already be in the print queue |
+| 503 | The renderer is starting, restarting or shutting down, or the print command is unavailable | `Retry-After: 1` for the renderer |
+| 504 | The processing deadline passed | Pages may already be in the print queue |
 
-A caller that disconnects is logged with status 499. Native IIS rejections and
-forced process termination cannot be guaranteed to produce problem details.
+When the caller disconnects, the log records status 499. A response from IIS itself, or a process
+that is killed, may not produce problem details.
 
 ### Deadlines and capacity
 
-One deadline, `options.timeoutMs`, covers waiting in the queue, loading the
-document, readiness, PDF generation, and page counting. All stages share that
-deadline; response transmission has a separate lifetime. Two renders run concurrently and
-eight more may wait by default; the eleventh concurrent request receives 429. The
-admission permit is held until the response has been sent, so slow clients count
-against capacity. The [Configuration guide](../configuration.md#rendering-limits)
-explains the settings.
+One deadline, `options.timeoutMs`, covers reading the request, waiting for a render slot, loading
+the document, the readiness conditions, PDF generation and page counting. Sending the response is
+outside it.
+
+By default two renders run and eight more requests wait, so the eleventh request at the same time
+gets 429. A request holds its place until its response has been sent, so slow clients count
+against capacity. [Configuration](../configuration.md#rendering-limits) lists the settings.
+
+The complete JSON body counts against the body limit, with the escaped HTML and the templates.
+Large embedded images are the usual reason to come near it. Use SVG, or raster images sized for
+print.
 
 ## GET /v1/health
 
-Returns 200 `{"status":"ready"}` only after a successful warm-up while the browser
-is available, and 503 `{"status":"unavailable"}` during startup, browser
-replacement, failure, or shutdown. Readiness stays healthy during queue saturation;
-render requests beyond capacity receive 429. The anonymous endpoint supports IIS
-Application Initialization and load balancer probes.
+Returns 200 `{"status":"ready"}` once the browser has completed its warm-up render and while it
+is available. Returns 503 `{"status":"unavailable"}` during startup, browser replacement, failure
+and shutdown. A full queue does not change it. The route is anonymous for IIS Application
+Initialization and load balancer probes.
 
 ## GET /v1/info
 
 ```json
 {
-  "version": "1.1.0+d57eddc…",
+  "version": "1.2.1+d57eddc…",
   "playwrightVersion": "1.64.1",
   "chromiumVersion": "156.0.8078.4",
   "active": 0, "queued": 0, "admitted": 0, "admissionLimit": 10,
@@ -182,76 +175,101 @@ Application Initialization and load balancer probes.
 }
 ```
 
-`fonts` lists only the packaged faces guaranteed by the release. `storedBytes`
-includes a per-job metadata reserve. Readiness stays healthy when the queue or
-storage budget is full.
+`active` and `queued` count renders in progress and waiting. `admitted` counts synchronous
+requests from admission to the end of their response, and `admissionLimit` is `concurrency` plus
+`queueLimit`. `fonts` lists the packaged faces. `jobs.storedBytes` includes 16 KiB for each
+stored job.
 
 ## GET /v1/printers
 
-Returns `{"printers":["pdf-test","shipping"]}`: the configured allowlist, sorted,
-for callers presenting a valid API key. Use Windows or CUPS to inspect queue health.
-
-## Request size and encoding
-
-The complete encoded JSON body, including escaped HTML and templates, counts
-against the 25 MiB application limit; the host applies a 32 MiB outer ceiling.
-Request compression is not supported. Large embedded images are the usual reason
-to approach the limit; prefer SVG or appropriately sized raster `data:` URLs.
+Returns the configured identifiers in order, such as `{"printers":["pdf-test","shipping"]}`, to a
+caller with a valid API key. It does not report whether a queue works.
 
 ## Asynchronous jobs (opt-in)
 
-When the server sets `Jobs:Enabled` to `true`, these routes are registered;
-otherwise they return 404. They use the configured access mode. A job's owner is
-the API key that submitted it: another key always receives 404, including on
-deletion. Anonymous callers share one owner and can list and read each other's
-jobs, so use API-key mode for private work.
+With `Jobs:Enabled` set to `true` on the server, the routes below exist. Otherwise they return
+404. They follow the configured access mode.
+
+A job belongs to the API key that submitted it. Another key gets 404 for that job, also on
+deletion. Callers without a key share one owner and can list, read and delete each other's jobs,
+so use API-key mode for private work.
 
 | Endpoint | Response |
 |---|---|
-| `POST /v1/jobs` | Same body and validation as `/v1/render`; 202 with the job JSON, a `Location` header and `Retry-After`. Queue or quota pressure returns 429 with `Retry-After` |
-| `GET /v1/jobs/{id}` | The job JSON; `Retry-After` while queued or rendering; 404 for an unknown or another owner's ID |
-| `GET /v1/jobs/{id}/result` | The PDF with `Content-Disposition`, `X-Render-Pages`, `X-Render-Duration-Ms` and `Cache-Control: no-store`. 409 with `Retry-After` before completion or while another download is in progress; 410 after cancellation or expiry |
-| `DELETE /v1/jobs/{id}` | 204. Cancels queued or active work, or deletes a stored result. Repeating it is still 204 while the metadata exists; unknown or other-owner IDs return 404 |
-| `GET /v1/jobs?status=&limit=&after=` | `{ items, nextAfter }`: the caller's jobs, newest first. `limit` is 1 to 100 (default 50); `after` is the last ID returned |
+| `POST /v1/jobs` | Takes the body of `/v1/render`, with the same validation. 202 with the job document, a `Location` header and `Retry-After`. 429 with `Retry-After` when the queue, the owner's share of it, or the storage budget is full. |
+| `GET /v1/jobs/{id}` | The job document, with `Retry-After` while the job is queued or rendering. 404 for an unknown ID or another owner's job. |
+| `GET /v1/jobs/{id}/result` | The PDF, with `Content-Disposition`, `X-Render-Pages` and `X-Render-Duration-Ms`. 409 before the job has succeeded, for a failed job, for a print job, and while another download of the result is in progress. 410 after cancellation or expiry. |
+| `DELETE /v1/jobs/{id}` | 204. Cancels a queued or rendering job, or deletes a stored result. Repeating it returns 204 while the job's record exists. 404 for an unknown ID or another owner's job. |
+| `GET /v1/jobs?status=&limit=&after=` | `{ "items": [...], "nextAfter": ... }` with the caller's jobs, newest first. `status` is one status name in lower case. `limit` is 1 to 100, 50 by default. `after` is the ID of the last job of the previous page, which `nextAfter` gives while more jobs follow. |
 
 ### Submitting
 
-Job IDs are 128 random bits written as 32 lowercase hex characters. A submission
-may carry one `Idempotency-Key` header of 1 to 128 visible ASCII characters. The
-same owner and key return the existing job for as long as it is retained, including
-in a terminal or tombstone state, and the first body wins. Use a new key for
-distinct work. Print jobs require an API key and a configured printer identifier,
-exactly as synchronous printing does.
+A job ID is 128 random bits, written as 32 lower-case hexadecimal characters.
+
+A submission may carry one `Idempotency-Key` header of 1 to 128 visible ASCII characters. While
+the job is retained, in any state, the same owner and key get the existing job back, and the body
+of the later request is ignored. Use a new key for new work.
+
+A print job needs an API key and a configured printer identifier, as synchronous printing does.
 
 ### The job document
 
-A job has `id`, `status` (`queued`, `rendering`, `succeeded`, `failed`, `cancelled`,
-`expired`), `createdUtc`, optional `startedUtc` and `completedUtc`, `expiresUtc`,
-`fileName` and `links`. Queued jobs expose `queuePosition`, the
-global submission order; treat it as an estimate because scheduling rotates
-between owners. Succeeded jobs include `pageCount` and `durationMs`. Failed jobs
-carry an `error` with `type`, `title`, `status`, `detail`, `code` and `retryable`.
-Print jobs include `printer` and a `printJob` receipt, and their result route
-returns 409 because no PDF is retained. Failed jobs also return 409 on the result
-route; decide whether to retry from the job's `error`, not from `Retry-After`.
+```json
+{
+  "id": "9f1c2e4d6b7a4c3e8d5f0a1b2c3d4e5f",
+  "status": "queued",
+  "queuePosition": 12,
+  "createdUtc": "2026-11-02T03:10:00Z",
+  "expiresUtc": "2026-11-02T03:20:00Z",
+  "fileName": "statement-10231.pdf",
+  "links": { "self": "/v1/jobs/9f1c2e4d6b7a4c3e8d5f0a1b2c3d4e5f", "result": "/v1/jobs/9f1c2e4d6b7a4c3e8d5f0a1b2c3d4e5f/result" }
+}
+```
+
+| Field | Present | Meaning |
+|---|---|---|
+| `id`, `createdUtc`, `expiresUtc`, `fileName`, `links` | Always | `links` holds the paths of the job and its result, including the application's base path under IIS. |
+| `status` | Always | `queued`, `rendering`, `succeeded`, `failed`, `cancelled` or `expired`. |
+| `queuePosition` | While queued | The position in submission order across all owners. An estimate, because the scheduler takes owners in turn. |
+| `startedUtc`, `completedUtc` | Once reached | When rendering started and when the job ended. |
+| `pageCount`, `durationMs` | When succeeded | The page count and the processing time. |
+| `printer`, `printJob` | Print jobs | The printer identifier, and the receipt once the job has succeeded. |
+| `error` | When failed or expired | `type`, `title`, `status`, `detail`, `code` and `retryable`. |
+
+Decide whether to submit a failed job again from its `error`, not from `Retry-After`:
+
+| `error.code` | Meaning | `retryable` |
+|---|---|---|
+| `document` | A readiness condition or the document itself failed. | `false` |
+| `deadline` | The processing deadline passed. | `true`, or `false` when pages may have reached the printer |
+| `interrupted` | The service stopped while the job was rendering. | `true`, or `false` when pages may have reached the printer |
+| `renderer_unavailable` | The browser restarted or stopped. | `true` |
+| `storage_full` | The PDF did not fit in the storage budget. | `true` |
+| `printing_unavailable` | The print command is unavailable. | `true` |
+| `print_submission` | The print command reported a failure. | `false` |
+| `internal` | The job could not be started or completed. | `false` |
+| `queue_expired`, `expired`, `downloaded` | The job expired while waiting, after its retention, or after its download with `DeleteResultOnDownload`. | `false` |
+
+When `retryable` is `false` for a print job, check the print queue before you submit it again:
+pages may have printed.
 
 ### Scheduling and restarts
 
-The rendering timeout starts when a job is dispatched. `Jobs:MaxQueueAge` limits
-its wait in the queue. Workers take jobs in submission order and rotate between
-owners, using the slots available after reserving synchronous capacity. After a
-restart, queued jobs resume and jobs that were rendering are marked failed with
-the code `interrupted`. Callers poll for status and decide whether to resubmit a
-failed job. An interrupted print submission may already have reached the spooler;
-check the queue before resubmitting.
+A job's processing deadline starts when the job starts to render, and `Jobs:MaxQueueAge` limits
+the wait before that. The scheduler starts jobs in submission order and takes the owners in turn.
+It uses the render slots that the reserve for synchronous requests leaves free, and waits while
+a synchronous request waits.
+
+After a restart, queued jobs resume, and a job that was rendering is failed with the code
+`interrupted`. Pressroom never runs a job a second time by itself.
 
 ### Retention
 
-The submitted HTML is deleted as soon as a job succeeds. PDFs and the HTML of
-failed jobs follow the [configured retention](../configuration.md#asynchronous-jobs).
-Expired metadata remains as a tombstone for one extra `ResultRetention` period, so
-the result route returns 410 before the ID finally returns 404. With
-`DeleteResultOnDownload` on, a job expires after one complete successful download;
-only one download per job is admitted at a time. Because the server cannot know
-whether the client received every byte, leave that option off when a download may
-need to be repeated.
+Pressroom deletes the submitted HTML when a job succeeds. PDFs, and the HTML of failed jobs,
+follow the [retention settings](../configuration.md#asynchronous-jobs). An expired job's record
+stays for one more `ResultRetention`, during which the result route returns 410. After that the
+ID returns 404.
+
+With `Jobs:DeleteResultOnDownload`, a job expires after one complete download. The server cannot
+know whether the client kept every byte, so leave the setting off when a download may need to be
+repeated.

@@ -1,39 +1,29 @@
 # .NET client
 
-`AurorisNet.Pressroom.Client` handles HTTP requests, validation, streaming and error
-mapping for .NET 8 and .NET 10 applications. This single NuGet package includes the
-`Pressroom.Client` and `Pressroom.Contracts` assemblies and uses the .NET base class
-library to call a running Pressroom service. Applications in other languages
-can use any HTTP client to call the [API](api.md).
+`AurorisNet.Pressroom.Client` calls a running Pressroom service from a .NET 8 or .NET 10
+application. It builds the requests, validates them before sending, streams the PDF and turns
+error responses into exceptions. Applications in other languages call the [API](api.md) with any
+HTTP client.
 
 ## Installing the package
 
-For versions published to NuGet.org:
-
 ```sh
-dotnet add package AurorisNet.Pressroom.Client --version <version>
+dotnet add package AurorisNet.Pressroom.Client
 ```
 
-For GitHub builds, download and extract the `nuget-packages` artifact from a successful
-[Packages workflow run](https://github.com/auroris/Pressroom/actions/workflows/release.yml),
-or download `AurorisNet.Pressroom.Client.<version>.nupkg` from a GitHub release.
-Place it in a local feed directory, such as `./packages`, and add `--source ./packages`
-to the command above. Symbols and SHA-256 files are included in the download too.
+Each [GitHub release](https://github.com/auroris/AurorisNet.Pressroom/releases) also holds
+`AurorisNet.Pressroom.Client.<version>.nupkg`, its `.snupkg` symbols and their `.sha256` files.
+To install from the file, put it in a local feed folder such as `./packages` and add
+`--source ./packages` to the command.
 
-`Pressroom.Contracts` holds the request and option records, `IPdfRenderer`, the
-validator, and the JSON settings. Its assembly is bundled in the client package;
-there is no separate Contracts package dependency. The source projects and C#
-namespaces remain separate.
-
-When upgrading from the old distribution, remove both `Pressroom.Client` and
-`Pressroom.Contracts` package references and add `AurorisNet.Pressroom.Client`.
-Existing `using Pressroom.Client;` and `using Pressroom.Contracts;` statements
-continue to work.
+The package holds two assemblies, `Pressroom.Client` and `Pressroom.Contracts`, and depends on no
+other package. `Pressroom.Contracts` has the request and option records, `IPdfRenderer`,
+`RequestValidator` and the JSON settings, in the namespace of the same name.
 
 ## Creating a client
 
-`PressroomClient` wraps an `HttpClient` you own. The base address must end with a
-slash, and the API key goes in a default header:
+`PressroomClient` wraps an `HttpClient` that you own. Its base address must end with a slash, and
+the API key goes in a default header:
 
 ```csharp
 using Pressroom.Client;
@@ -43,17 +33,16 @@ builder.Services.AddHttpClient<PressroomClient>(http =>
 {
     http.BaseAddress = new Uri(builder.Configuration["Pressroom:Url"]!);   // https://pressroom.example/
     http.DefaultRequestHeaders.Add("X-Api-Key", builder.Configuration["Pressroom:ApiKey"]!);
-    http.Timeout = TimeSpan.FromSeconds(65);                               // above the server's maximum deadline
+    http.Timeout = TimeSpan.FromSeconds(65);                               // above the server's longest deadline
 });
 ```
 
-Omit the header when the server runs in anonymous mode. Store the URL and key in
-your application's configuration.
+Leave the header out when the server runs in anonymous mode. Keep the URL and the key in your
+application's configuration.
 
 ## Rendering a PDF
 
-The buffered overload returns the whole PDF in memory together with the response
-metadata:
+`RenderAsync` returns the whole PDF in memory with the response metadata:
 
 ```csharp
 RenderedPdf pdf = await pressroom.RenderAsync(new RenderRequest
@@ -70,33 +59,35 @@ RenderedPdf pdf = await pressroom.RenderAsync(new RenderRequest
 // pdf.Bytes, pdf.FileName, pdf.PageCount, pdf.DurationMs
 ```
 
-For large documents, stream instead. `RenderStreamAsync` returns a
-`PdfRenderResult` that owns the response; copy its `PdfStream` and dispose it:
+For a large document, stream it. `RenderStreamAsync` returns a `PdfRenderResult` that owns the
+HTTP response. Copy its `PdfStream`, then dispose it:
 
 ```csharp
 await using PdfRenderResult result = await pressroom.RenderStreamAsync(request, cancellationToken);
 await result.PdfStream.CopyToAsync(destination, cancellationToken);
 ```
 
-Callers using the `IPdfRenderer` interface can stream through
+Code written against the `IPdfRenderer` interface streams too, through
 `RenderAsync(string html, RenderOptions options, CancellationToken)`.
 
-The client validates the request locally with the same rules as the server and
-throws `ArgumentException` for invalid values before sending a request. Your tests
-can catch a misspelt unit or a margin that leaves an empty printable area.
+The client validates a request with the server's rules before it sends it, and throws
+`ArgumentException` that names the invalid fields. A test can so catch a misspelled unit or
+margins that leave no printable area. The client accepts `options.timeoutMs` up to 300000,
+because it does not know the server's `Render:MaxTimeoutMs`. The server still applies its own
+maximum.
 
 ## Returning the PDF to a browser
 
-A web application chooses how to deliver the PDF using its own response headers.
-Pressroom returns bytes and a sanitized filename. For a download, use the
-framework's file API:
+Pressroom returns the bytes and a sanitized file name. Your web application decides, with its own
+response headers, whether the browser downloads or shows the PDF. For a download, use the
+framework's file result:
 
 ```csharp
 // ASP.NET Core MVC
 return File(pdf.Bytes, "application/pdf", pdf.FileName);
 ```
 
-For a preview, set a typed header in the application instead:
+For a preview, set the header yourself:
 
 ```csharp
 // ASP.NET Core MVC
@@ -106,16 +97,13 @@ Response.GetTypedHeaders().ContentDisposition = disposition;
 return File(pdf.Bytes, "application/pdf");
 ```
 
-The typed header handles Unicode filenames. Browser settings and PDF support
-determine whether the preview is displayed. If upgrading an existing caller,
-remove its Pressroom `Disposition` assignments and use an application-owned
-choice between these responses; see [API migration notes](api.md#upgrading-callers-that-use-disposition).
+The typed header encodes Unicode file names. Whether the browser shows the preview depends on its
+settings and its PDF support.
 
 ## Printing
 
-`PrintAsync` sends the same request with a `Printer` identifier and returns the
-submission receipt. The PDF-returning methods reject requests that carry a
-printer, and `PrintAsync` rejects requests without one:
+`PrintAsync` sends a request that has a `Printer` identifier, and returns the receipt. It rejects
+a request without a printer, and the methods that return a PDF reject a request with one:
 
 ```csharp
 PrintJobResult job = await pressroom.PrintAsync(new RenderRequest
@@ -127,16 +115,16 @@ PrintJobResult job = await pressroom.PrintAsync(new RenderRequest
 // job.JobId, job.Printer, job.Status == "submitted", job.PageCount
 ```
 
-The calling application decides whether to retry a print submission. Check the
-Windows or CUPS queue first, because the original request may already have reached
-the spooler. See [Printing](../printing.md) for receipt semantics and retry handling.
+The client never repeats a print request. Before your application does, check the Windows or CUPS
+queue, because the first request may have reached the spooler.
+[Printing](../printing.md) explains the receipt and the errors.
 
 ## Batch rendering
 
-Enable jobs on the server first. `SubmitAsync` accepts the same RenderRequest and
-an optional 1–128 character visible-ASCII idempotency key. The same key under the
-same caller returns the existing job for its retention window, even if a later
-request's body differs; choose a new key for new work.
+Turn on jobs on the server first. `SubmitAsync` takes the same `RenderRequest` and an optional
+idempotency key of 1 to 128 visible ASCII characters. While the server retains the job, the same
+caller and key get the existing job back, even when the later request has another body. Use a new
+key for new work.
 
 ```csharp
 RenderJob job = await pressroom.SubmitAsync(request, "statement-10231", cancellationToken);
@@ -144,44 +132,49 @@ RenderJob completed = await pressroom.WaitAsync(job.Id, cancellationToken, TimeS
 if (completed.Status == JobStatus.Succeeded && completed.Printer is null)
 {
     RenderedPdf pdf = await pressroom.DownloadAsync(job.Id, cancellationToken);
-    await pressroom.CancelAsync(job.Id, cancellationToken); // delete the stored result early
+    await pressroom.CancelAsync(job.Id, cancellationToken); // deletes the stored result early
 }
 ```
 
-`WaitAsync` polls at the interval the server suggests in `Retry-After` (one second
-if absent, never more than ten), returns as soon as the job reaches any terminal
-state, and throws `TimeoutException` when `maxWait` runs out. Cancelling the wait
-stops the polling, not the job on the server. `GetJobAsync` reads a job's current
-state, and `ListJobsAsync` pages through the caller's jobs by status so an
-application can reconcile after a crash. `DownloadStreamAsync` owns its HTTP
-response in the same way as `RenderStreamAsync`; dispose it when done.
+| Method | What it does |
+|---|---|
+| `SubmitAsync` | Creates a job and returns its document. |
+| `GetJobAsync` | Reads a job's current state. |
+| `WaitAsync` | Polls until the job reaches a final state, at the interval the server gives in `Retry-After`: one second when absent, never more than ten. Throws `TimeoutException` when `maxWait` runs out. Cancelling the wait leaves the job on the server. |
+| `DownloadAsync`, `DownloadStreamAsync` | Return the PDF in memory, or as a `PdfRenderResult` to dispose, as `RenderStreamAsync` does. |
+| `CancelAsync` | Cancels a queued or rendering job, or deletes a stored result. |
+| `ListJobsAsync` | Pages through the caller's jobs, optionally by status, so an application can find its jobs again after a crash. |
 
-For PDF batches, bounded submission, polling, download, and deletion are built in:
+`RenderManyAsync` runs a batch of PDF requests. It submits, polls, downloads and deletes each
+job, with at most `maxInFlight` (1 to 1024) in progress:
 
 ```csharp
 await foreach (RenderManyResult item in pressroom.RenderManyAsync(requests, 8, cancellationToken))
 {
     if (item.Error is { } error)
     {
-        // Inspect StatusCode, Code and Retryable. Choose your own retry policy.
+        // Inspect StatusCode, Code and Retryable, and apply your own retry policy.
         continue;
     }
     await File.WriteAllBytesAsync(item.Pdf!.FileName, item.Pdf.Bytes, cancellationToken);
 }
 ```
 
-Results arrive in completion order and carry the original request. Exactly one
-of `Pdf` and `Error` is populated. The client never retries a failed submission or
-render. An HTTP transport failure is reported as a `transport` error whose
-retryability is unknown, because the server may have accepted the job; list your
-jobs before resubmitting. Disposing the enumeration early, or cancelling, stops the
-local work and leaves any acknowledged jobs on the server. Use `SubmitAsync` and
-`WaitAsync` for printer jobs, whose result is a receipt rather than a PDF.
+- Results arrive as jobs complete, and each carries its request. Exactly one of `Pdf` and `Error`
+  is set.
+- The client never repeats a submission or a render that failed.
+- A failure of the HTTP connection gives an error with the code `transport` and no `Retryable`
+  value, because the server may have accepted the job. List your jobs before you submit again.
+- Leaving the loop early, or cancelling, stops the local work. Jobs the server accepted stay
+  there.
+- A request with a printer gives an error. Use `SubmitAsync` and `WaitAsync` for print jobs,
+  whose result is a receipt.
 
 ## Errors, retries, and fallback
 
-Server failures throw `PressroomException` with the HTTP status, the problem
-`Detail`, any validation `Errors`, and the parsed `RetryAfter` delay:
+An error response throws `PressroomException`, with the HTTP `StatusCode`, the problem `Detail`,
+the validation `Errors`, the `RetryAfter` delay, and the `Code` and `Retryable` values of a job
+error:
 
 ```csharp
 try
@@ -194,28 +187,30 @@ catch (PressroomException ex) when (ex.StatusCode is HttpStatusCode.TooManyReque
 }
 catch (PressroomException ex) when (ex.StatusCode == HttpStatusCode.UnprocessableEntity)
 {
-    // The document's readiness condition failed. Retrying the same document will not help.
+    // The document failed to render. Sending the same document again will not help.
 }
 ```
 
-Configure retries in the calling application, with a total deadline suited to the
-document's purpose. Suggested policy:
+A response that is neither an error nor the expected PDF or JSON throws `HttpRequestException`.
 
-- Retry 429 and 503 once after `RetryAfter`, with a bounded total wait.
-- Do not retry 400, 401, 413, 422, or 504.
-- Treat a connection failure or your own `HttpClient` timeout as unavailable.
+Retries belong to the calling application, within a total deadline that suits the document. A
+policy to start from:
 
-Many applications keep an **HTML fallback**: when no Pressroom URL is configured,
-or a render fails, deliver the same HTML to the browser and let the user print it.
-Use the render's response or connection error to choose that fallback.
-`IsReadyAsync` supports dashboards and startup checks.
+- Retry 429 and 503 once after `RetryAfter`, with a limit on the total wait.
+- Do not retry 400, 401, 413, 422 or 504.
+- Treat a connection failure, or a timeout of your own `HttpClient`, as an unavailable service.
+
+Many applications keep an **HTML fallback**: when no Pressroom URL is configured, or a render
+fails, they send the same HTML to the browser and let the user print it. `IsReadyAsync` reads
+`/v1/health` and returns `false` while the service is unavailable, for dashboards and startup
+checks.
 
 ## Local development
 
-Point `Pressroom:Url` at a local console run on `localhost`
-(see [Getting started](../getting-started.md#4-run-it)) and keep a separate key or
-anonymous mode for development.
+Point `Pressroom:Url` at a console run on `localhost`, as in
+[Getting started](../getting-started.md#4-run-it), with a key of its own or anonymous mode.
 
-Applications can also host rendering in their own process by referencing
-`Pressroom.Rendering` and provisioning its browser. Select this integration
-explicitly; the HTTP client calls the configured server.
+An application can also render in its own process with the `Pressroom.Rendering` project. That
+project is not published as a package: reference it from a checkout and supply its browser files.
+[Rendering service design](rendering-service-design.md#hosting-the-renderer-in-another-process)
+lists what the renderer changes in the hosting process.

@@ -1,143 +1,134 @@
 # Deployment on Windows and IIS
 
-Direct Windows/IIS deployments are intended primarily for intranets. For
-internet-facing traffic, prefer the [Linux container](container.md) with its
-documented isolation, or [direct Linux](linux.md) under a dedicated unprivileged
-user. With jobs enabled, provision `Jobs:MaxStoredBytes` plus one result commit,
-logs and temp space. Run one instance per state root and disable IIS overlapped
-recycling for the local job store: stop the old worker before its replacement
-starts, or the store lock rejects the second instance.
+Host a Pressroom release as an IIS application. You set up IIS once, then copy a new release
+folder into place for each update.
 
-A Pressroom release is one folder. Deploying it means provisioning IIS once, then
-copying the folder into place for every update. The release contains the renderer,
-its runtime dependencies, and the fonts needed for document output.
+Windows and IIS deployments are meant for intranets. For internet-facing traffic, use the
+[Linux container](container.md) with outbound blocking, or [Linux](linux.md) under a dedicated
+unprivileged user.
 
 ## Server prerequisites
 
 | Requirement | Notes |
 |---|---|
-| Windows Server x64 | A version supported by both .NET 10 and the pinned Playwright release; Windows Server 2019 or later at the time of writing. Record the tested build in the [acceptance record](windows-acceptance.md) |
-| IIS with the **.NET 10 Hosting Bundle** | The bundle supplies the ASP.NET Core module. A runtime or SDK alone is not enough, and the module is required even for the self-contained profile |
-| .NET 10 runtime | Installed by the Hosting Bundle. A later major runtime alone does not satisfy a `net10.0` application |
-| Application Initialization | Optional IIS feature that keeps the renderer warm |
+| Windows Server x64 | A version that both .NET 10 and the packaged Playwright release support. Record the tested build in the [acceptance record](windows-acceptance.md). |
+| IIS with the **.NET 10 Hosting Bundle** | The bundle supplies the ASP.NET Core module and the .NET 10 runtime. A runtime or SDK alone lacks the module, and a later major runtime does not run a `net10.0` application. |
+| Application Initialization | Optional IIS feature that starts the renderer before the first request. |
 
-([Hosting Bundle](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/hosting-bundle?view=aspnetcore-10.0),
-[runtime selection](https://learn.microsoft.com/en-us/dotnet/core/versions/selection),
-[Playwright supported systems](https://playwright.dev/dotnet/docs/intro).)
+See the [Hosting Bundle](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/hosting-bundle?view=aspnetcore-10.0),
+[runtime selection](https://learn.microsoft.com/en-us/dotnet/core/versions/selection) and
+[Playwright's supported systems](https://playwright.dev/dotnet/docs/intro).
 
 ## What is in a release
 
-Each GitHub release contains `Pressroom-<version>-win-x64-framework-dependent.zip`
-and a `.zip.sha256` checksum, alongside the Linux tarball and the .NET client
-packages for application teams. The ZIP holds:
+Each GitHub release holds `Pressroom-<version>-win-x64-framework-dependent.zip` and its
+`.zip.sha256` checksum, beside the Linux tarball and the .NET client package. The ZIP holds:
 
 | Content | Purpose |
 |---|---|
-| `Pressroom.Server.exe`, `.dll`, `web.config`, dependency assemblies | The application, with IIS in-process hosting |
-| `.playwright/` | The private Node runtime and Playwright driver. Hidden folder; **required** |
-| `browsers/` | The matching Chromium headless shell and companion files |
-| `fonts/` and `fonts/manifest.json` | Noto Sans faces with licence and hashes |
-| `appsettings.json` | Nonsecret defaults |
-| `notices/`, `THIRD-PARTY-NOTICES.md` | Third-party licences |
-| `release-manifest.json` | Versions, font inventory, and SHA-256 hashes of every file |
-| `docs/` | These guides, including the acceptance checklist for this release |
+| `Pressroom.Server.exe`, `.dll`, `web.config`, dependency assemblies | The application, set up for IIS in-process hosting |
+| `.playwright/` | The private Node runtime and Playwright driver. A hidden folder, and **required** |
+| `browsers/` | The matching Chromium headless shell and its companion files |
+| `fonts/` | The Noto Sans faces, their license, and `manifest.json` with their hashes |
+| `appsettings.json` | The default settings, without secrets |
+| `notices/` | `THIRD-PARTY-NOTICES.md` and the license files of the packaged components |
+| `release-manifest.json` | The Pressroom, Playwright, Node and Chromium versions, the fonts, and the SHA-256 hash of every file except `web.config` |
+| `README.md`, `docs/`, `deploy/` | These guides and the container examples |
 
-Verify the checksum, then extract the complete archive. Only the framework-dependent
-package is published; it needs the Hosting Bundle on the server.
+Check the archive against its checksum, then extract all of it.
 
 ## Directory layout and permissions
 
-Keep everything that changes at run time outside the replaceable release folder:
+Keep everything that changes at run time outside the release folder, which each update replaces:
 
 | Path (example) | Application pool identity |
 |---|---|
 | `C:\Sites\Pressroom` | Read and execute |
 | `C:\ProgramData\Pressroom` | Read and traverse |
-| `C:\ProgramData\Pressroom\pressroom.settings.json` | Read; administrators manage it |
+| `C:\ProgramData\Pressroom\pressroom.settings.json` | Read. Administrators manage it. |
 | `C:\ProgramData\Pressroom\temp` | Modify |
 | `C:\ProgramData\Pressroom\logs` | Modify |
+| `C:\ProgramData\Pressroom\jobs`, when jobs are enabled | Modify |
 
-Create the state root, `temp`, and `logs` before the first start and grant these
-rights to the dedicated pool identity, such as `IIS AppPool\Pressroom`. Restrict
-the settings file to that identity and administrators. Apply the permissions in
-the table to each directory.
+Create the state root, `temp` and `logs` before the first start, and grant these rights to the
+dedicated pool identity, such as `IIS AppPool\Pressroom`. Restrict the settings file to that
+identity and administrators.
 
-Write the settings file as described in [Configuration](configuration.md): at
-minimum `Paths:StateRoot` and either API keys or explicit anonymous mode.
+Write the settings file as [Configuration](configuration.md) describes. It needs at least
+`Paths:StateRoot` and either an API key or anonymous mode.
+
+With jobs enabled, give the state root room for `Jobs:MaxStoredBytes`, one more result, the logs
+and temporary files.
 
 ## IIS settings
 
-Create a site or application pointing at the release folder with a dedicated
-application pool:
+Create a site or application that points at the release folder, with an application pool of its
+own:
 
 | Setting | Value |
 |---|---|
-| Application pool | Dedicated to Pressroom; **No Managed Code** |
+| Application pool | Dedicated to Pressroom, **No Managed Code** |
 | Enable 32-Bit Applications | **False** |
 | Maximum Worker Processes | **1** |
 | Start Mode | **AlwaysRunning** |
 | Load User Profile | **True** |
-| Idle Time-out | **0** for an always-warm renderer |
+| Idle Time-out | **0**, so the renderer stays started |
 | Application Preload | **True**, with Application Initialization installed |
 | Warm-up URL | `/v1/health` |
-| Authentication | Enable **Anonymous Authentication**; disable **Windows Authentication** |
-| Site binding | HTTPS with your existing certificate |
+| Authentication | **Anonymous Authentication** enabled, **Windows Authentication** disabled |
+| Site binding | HTTPS with your certificate |
 
-IIS Anonymous Authentication lets requests reach the application, which then
-enforces its own API-key or anonymous access mode.
+Anonymous Authentication lets requests reach the application, which then applies its own API-key
+or anonymous access mode.
 
-Request limits: IIS request filtering and the ASP.NET Core server accept bodies up
-to 32 MiB; the application enforces its 25 MiB cap before deserialization. Raising
-the application cap requires reviewing both outer settings.
+**Request size.** `web.config` sets IIS request filtering to 32 MiB, and the application rejects a
+body over `Render:MaxBodyBytes`, 25 MiB by default, before it parses it. `MaxBodyBytes` must stay
+below 32 MiB.
 
-Overlapped recycling can briefly run two application instances, each with its own
-browser and temporary directory. Budget memory for the overlap, or disable overlap
-and accept the restart interruption.
+**Recycling.** Overlapped recycling runs two instances for a short time, each with its own browser
+and temporary folder. Allow memory for both, or disable overlapped recycling and accept the
+interruption. With jobs enabled, disable it: the job store accepts one instance, and the new
+worker fails to start while the old one still holds the store.
 
 ## First start
 
-1. Run the package check as the deploying user to prove the payload on this server:
+1. Run the package check as the deploying user:
+
    ```powershell
    & 'C:\Sites\Pressroom\Pressroom.Server.exe' --check --config 'C:\ProgramData\Pressroom\pressroom.settings.json'
    ```
+
 2. Start the application pool. Watch `C:\ProgramData\Pressroom\logs` for the
-   browser warm-up line.
-3. Request `/v1/health` and expect 200, then `/v1/info` with a key and confirm the
-   expected version.
-4. Perform a smoke render with
-   [`samples/orders-bilingual.request.json`](../samples/orders-bilingual.request.json)
-   and open the result.
+   `Browser warm-up succeeded` line.
+3. Request `/v1/health` and expect 200. Request `/v1/info` with a key and confirm the version.
+4. Render a document as in [Getting started](getting-started.md#5-render-your-first-pdf) and
+   open the result.
 
 The first deployment of a release to a new server should complete the
-[Windows / IIS acceptance record](windows-acceptance.md): pool identity, both
-access modes through real IIS, limits and cancellation, recycling, update and
-rollback, and a soak run.
+[Windows and IIS acceptance record](windows-acceptance.md).
 
 ## Updating
 
-Update during a brief maintenance window: stop the application, replace the release
-folder, and start it again.
+Plan a short maintenance window: stop the application, replace the release folder, start it again.
 
-1. Stage and verify the new release elsewhere on the server (checksum, extract,
-   `--check`). Keep the previous release folder for rollback.
-2. Stop the application pool, or place `app_offline.htm` at the site root, and wait
-   for the browser and driver file locks to clear. The application has a bounded
-   shutdown window to drain renders and close Chromium.
-3. Replace only the application folder. `robocopy /MIR` is suitable when the
-   destination contains nothing but release files; configuration, logs, and
-   temporary data live elsewhere. Exit codes 0–7 are success; 8 and above are
-   failures. If you use `app_offline.htm`, exclude it from the mirror so it stays
-   until copying completes.
-4. On a copy failure, leave the application stopped and restore the previous
-   complete folder before starting.
-5. Start the pool or remove the offline file. Check `/v1/health`, confirm the
-   version in `/v1/info`, and run a smoke render.
+1. Extract the new release elsewhere on the server, check its checksum and run `--check`. Keep the
+   previous release folder for rollback.
+2. Stop the application pool, or place `app_offline.htm` at the site root, and wait until the
+   browser and driver files are no longer locked. The application has
+   `Render:ShutdownTimeoutMs` to finish renders and close Chromium.
+3. Replace the application folder only. `robocopy /MIR` suits a destination that holds nothing but
+   release files. Its exit codes 0 to 7 mean success, and 8 and above mean failure. If you use
+   `app_offline.htm`, exclude it from the mirror so it stays until the copy ends.
+4. If the copy fails, leave the application stopped and restore the previous complete folder
+   before you start it.
+5. Start the pool or remove the offline file. Check `/v1/health`, confirm the version in
+   `/v1/info`, and render a document.
 
 ## Rolling back
 
-Stop the pool, restore the previous complete release folder, start, and repeat the
-health, version, and smoke checks. The browser, driver, fonts, and application
-always roll back together because they ship as one folder.
+Stop the pool, restore the previous complete release folder, start the pool, and repeat the
+health, version and render checks. The application, driver, browser and fonts roll back together,
+because they ship as one folder.
 
 <a id="running-without-iis"></a>
 
@@ -149,17 +140,16 @@ The executable hosts itself on Kestrel for local use and checks:
 & 'C:\Sites\Pressroom\Pressroom.Server.exe' --config 'C:\ProgramData\Pressroom\pressroom.settings.json' --urls http://localhost:5177
 ```
 
-IIS in-process hosting is the supported production topology. Hosting the same
-executable as a Windows service or behind another reverse proxy is possible but
-not packaged or qualified by the release process.
+Releases are checked for IIS in-process hosting. Running the executable as a Windows service or
+behind another reverse proxy is left to you to package and qualify.
 
-## Operations checklist
+## Operations
 
-- Monitor `/v1/health` for readiness and `/v1/info` for queue depth and renders
-  since startup.
-- Watch for 429 rates (capacity) separately from 503 (browser replacement).
-- Rotate API keys by adding the new key, switching callers, then removing the old
-  one; each change needs a restart.
-- Review `release-manifest.json` after each deployment to confirm the deployed
-  Chromium and Playwright versions.
-- Logs roll daily, 14 files of 10 MiB; archive them if you need longer retention.
+- Monitor `/v1/health` for readiness, and `/v1/info` for queue depth and renders since startup.
+- Track 429 responses, which mean the capacity is in use, apart from 503 responses, which mean the
+  browser is starting or being replaced.
+- To rotate an API key, add the new key, move the callers to it, then remove the old key. Each
+  change needs a restart.
+- After each deployment, read `release-manifest.json` to confirm the Chromium and Playwright
+  versions.
+- Pressroom keeps 14 log files of at most 10 MiB each. Archive them if you need them longer.

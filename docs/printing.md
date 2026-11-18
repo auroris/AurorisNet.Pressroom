@@ -1,34 +1,31 @@
 # Printing
 
-Pressroom can render a document and submit its pages to an allowlisted printer on
-Windows or Linux. Printing uses the normal render request: add a
-`printer` identifier, authenticate with an API key, and receive a JSON submission
-receipt.
+Pressroom can render a document and hand its pages to a printer on the server. The request is an
+ordinary render request with a `printer` identifier and an API key, and the response is a JSON
+receipt. This page covers the host setup, the allowlist, and what the receipt and the errors mean.
 
 ## Requirements
 
-- **Windows: SumatraPDF** on the server. Install
-  [SumatraPDF](https://www.sumatrapdfreader.org/free-pdf-reader) or place its
-  portable executable in a folder the service can execute from. It is an optional
-  dependency used only for printer output and is not bundled with Pressroom.
-- **Linux: CUPS and its command-line client**, with a working PDF-capable queue.
-  Pressroom uses `/usr/bin/lp` by default, or CUPS `lpr` when configured below.
-  These are optional host dependencies and are not added to the Docker image.
-- **An API key.** Every valid configured key may print. Anonymous callers cannot
-  print or list printers, even when `Auth:Mode` is `Anonymous`.
-- **Printers visible to the service identity.** A printer installed only for an
-  interactive user may not be available to the IIS application pool or Linux service.
+- **Windows: SumatraPDF.** Install [SumatraPDF](https://www.sumatrapdfreader.org/free-pdf-reader),
+  or place its portable executable in a folder the service can run it from. Pressroom does not
+  include it.
+- **Linux: CUPS and its command-line client**, with a working queue that accepts PDF. Pressroom
+  runs `/usr/bin/lp` by default, or `lpr` when you configure it. The container image has neither,
+  so print from a Pressroom installed on the host.
+- **An API key.** Every configured key may print. A caller without a key cannot print or list
+  printers, also when `Auth:Mode` is `Anonymous`.
+- **Printers that the service identity can use.** A printer installed for an interactive user
+  only may be missing for the IIS application pool or the Linux service user.
 
 ## Configure the allowlist
 
-Each allowlist key is a caller-facing identifier of 1–128 ASCII letters, digits,
-underscores, and hyphens, matched ignoring case. Each value is an OS printer or
-CUPS destination name. Add printers to the initially empty allowlist in the external
-settings file, then restart Pressroom.
+The allowlist starts empty. Each key is the identifier callers send: 1 to 128 ASCII letters,
+digits, underscores and hyphens, matched without regard to case. Each value is the Windows printer
+name or the CUPS destination. Add printers in the external settings file, then restart Pressroom.
 
 ### Windows
 
-Set the SumatraPDF path and Windows printer names:
+Set the SumatraPDF path and the Windows printer names:
 
 ```json
 {
@@ -42,17 +39,19 @@ Set the SumatraPDF path and Windows printer names:
 }
 ```
 
-Grant the application pool identity execute access to SumatraPDF, print access to
-the selected queues, and Modify access to `temp` under `Paths:StateRoot`. Configure
-paper, tray, duplex, and other device defaults on the Windows printer itself: the
-render options decide the content of the pages, and SumatraPDF uses the printer's
-own settings to place them on paper. Qualify the output on the intended device.
+`SumatraPdfPath` must be an absolute path that ends in `.exe`. Startup fails when printers are
+configured without it.
+
+Grant the application pool identity the right to run SumatraPDF, print permission on the queues,
+and Modify on `temp` under `Paths:StateRoot`. Set paper, tray, duplex and the other device
+defaults on the Windows printer: the render options decide what is on each page, and SumatraPDF
+places the pages on paper with the printer's own settings. Check the output on the device you will
+use.
 
 ### Linux host
 
-Install CUPS and the CUPS client tools using your distribution's packages, then
-configure and test the intended queue. Run `lpstat -p -d` as the Pressroom service
-user to check which queues that identity can access. For example:
+Install CUPS and its client tools from your distribution, then set up and test the queue. Run
+`lpstat -p -d` as the Pressroom service user to see which queues that user can reach.
 
 ```json
 {
@@ -65,25 +64,22 @@ user to check which queues that identity can access. For example:
 }
 ```
 
-`CupsCommandPath` defaults to `/usr/bin/lp`; set it to `/usr/bin/lpr` to use CUPS
-`lpr`. It must be an absolute Linux path whose executable is named `lp` or `lpr`,
-with no command arguments. `SumatraPdfPath` is ignored on Linux, and
-`CupsCommandPath` is ignored on Windows. Configure the helper when enabling printing.
+`CupsCommandPath` defaults to `/usr/bin/lp`. Set it to `/usr/bin/lpr` to use `lpr`. It must be an
+absolute path to an executable named `lp` or `lpr`, without arguments. `SumatraPdfPath` is ignored
+on Linux, and `CupsCommandPath` on Windows.
 
-The service user needs permission to execute the helper, submit to the queue,
-and write under `Paths:StateRoot`. CUPS must accept submissions from this user
-without an interactive password prompt. Configure paper, tray, duplex, and other
-defaults in CUPS for that identity. Verify a PDF with
-`lp -d Warehouse_Laser /absolute/path/to/test.pdf` under the same identity before
-using the API. Pressroom submits the PDF with normal CUPS filtering, so the queue
-must support converting PDF for the device.
+The service user must be able to run the command, submit to the queue without a password prompt,
+and write under `Paths:StateRoot`. Set paper, tray, duplex and other defaults in CUPS for that
+user. Pressroom submits the PDF through the queue's normal filters, so the queue must be able to
+convert PDF for the device. Before you use the API, print a PDF as the service user:
 
-Use a direct Linux host installation for printing. The supplied Docker image
-omits the CUPS client and printer configuration.
+```sh
+sudo -u pressroom lp -d Warehouse_Laser /absolute/path/to/test.pdf
+```
 
 ## Submit a print job
 
-Send a valid `X-Api-Key` and add `printer` to a normal render request:
+Send a valid `X-Api-Key` and add `printer` to a render request:
 
 ```json
 {
@@ -93,19 +89,24 @@ Send a valid `X-Api-Key` and add `printer` to a normal render request:
 }
 ```
 
-`fileName` has no effect on printer output. Omitting `printer`
-or setting it to `null` returns a PDF as usual.
+`fileName` has no effect on printed output. Without `printer`, or with `"printer": null`, the
+response is the PDF as usual.
 
-Pressroom renders the document through Chromium, writes the PDF to a private job
-directory under `<StateRoot>/temp`, and invokes SumatraPDF's
-[`-print-to` command](https://www.sumatrapdfreader.org/docs/Command-line-arguments)
-on Windows, or [`lp -d`](https://www.cups.org/doc/man-lp.html) /
-[`lpr -P`](https://www.cups.org/doc/man-lpr.html) on Linux. Queue names and file
-paths are passed as separate arguments without a shell. Job directories are
-accessible only to the service user: mode 0700 on Linux, and a protected access
-list on Windows.
-When the helper reports success the response is **202 Accepted** with
-`application/json`:
+Pressroom renders the document, writes the PDF to a new folder under `<StateRoot>/temp`, and
+runs the print command on it:
+
+| Host | Command |
+|---|---|
+| Windows | SumatraPDF with [`-print-to`](https://www.sumatrapdfreader.org/docs/Command-line-arguments) and the printer name, `-silent`, and a private settings folder |
+| Linux, `lp` | [`lp -d <destination> -- <file>`](https://www.cups.org/doc/man-lp.html) |
+| Linux, `lpr` | [`lpr -P <destination> <file>`](https://www.cups.org/doc/man-lpr.html) |
+
+The printer name comes from the allowlist, never from the request, and Pressroom passes it and the
+file path as separate arguments without a shell. Only the service user can open the folder: it
+has mode 0700 on Linux, and on Windows an access list that names that identity alone. Pressroom
+removes the PDF after the command exits.
+
+When the command exits with success, the response is **202 Accepted** with `application/json`:
 
 ```json
 {
@@ -116,44 +117,40 @@ When the helper reports success the response is **202 Accepted** with
 }
 ```
 
-`submitted` confirms that the print helper accepted the submission. Check the
-Windows or CUPS queue for printing progress, offline devices and later spooler
-errors. `jobId` is Pressroom's correlation identifier and the temporary PDF's
-basename; it differs from the OS spooler job identifier.
+`submitted` means the print command accepted the document. Follow the progress, an offline
+device or a later spooler error in the Windows or CUPS queue. `jobId` is Pressroom's own
+identifier, which also appears in its log. It is not the spooler's job number.
 
-With asynchronous jobs enabled, `POST /v1/jobs` accepts the same `printer` field
-and API-key requirement. A successful job contains a `printJob` receipt instead
-of a downloadable PDF.
+`GET /v1/printers` returns the configured identifiers to a caller with a key, for example
+`{"printers":["pdf-test","shipping"]}`. It does not report whether a queue works.
 
-`GET /v1/printers` returns the configured identifiers to authenticated callers,
-for example `{"printers":["pdf-test","shipping"]}`. Check live queue health through
-Windows or CUPS.
+With asynchronous jobs enabled, `POST /v1/jobs` accepts the same `printer` field under the same
+key requirement. A print job that succeeds holds a `printJob` receipt and no PDF to download.
 
 ## Errors and retries
 
 | Status | Meaning |
 |---|---|
-| 400 | Unknown printer identifier (checked before rendering) |
-| 401 | Missing or invalid API key |
-| 502 | The print helper reported a submission failure |
-| 503 | The print helper or its local resources are unavailable |
-| 504 | The processing deadline expired during rendering or submission |
+| 400 | The printer identifier is not in the allowlist. Checked before rendering. |
+| 401 | The API key is missing or invalid. |
+| 502 | The print command exited with an error. |
+| 503 | The print command is missing or cannot start, or the temporary folder cannot be written. |
+| 504 | The processing deadline passed during rendering or submission. |
 
-The normal admission limit and processing timeout cover both rendering and
-submission. On cancellation or timeout the helper is stopped and the temporary
-files are removed after it exits; the OS spooler may retain document data
-independently.
+The admission limit and the processing deadline cover rendering and submission together. On a
+timeout or a cancelled request, Pressroom stops the print command and removes the temporary file
+once the command has exited.
 
-A timeout, disconnect, or failure can occur **after some or all pages reached the
-spooler**. Check the queue before retrying. Pressroom does not deduplicate or
-automatically retry print requests, and neither does the .NET client's
-`PrintAsync`.
+**A timeout, a dropped connection or a failure can come after some or all pages have reached the
+spooler.** Check the queue before you send the request again. Pressroom never repeats a print
+request, and neither does the .NET client's `PrintAsync`.
 
 ## Local test
 
-`Microsoft Print to PDF` is a convenient manual target. Select it as `pdf-test` and
-complete its **Save Print Output As** dialog before the request times out. Because
-it prompts for a destination file, use it for attended desktop tests. Choose an
-unattended queue for IIS. The [Windows acceptance checklist](windows-acceptance.md) and the
-[Linux acceptance checklist](linux.md#acceptance-checklist) include the printer
-checks for a real deployment.
+`Microsoft Print to PDF` works as a test printer on a desktop. Configure it as `pdf-test`, and
+complete its **Save Print Output As** dialog before the request times out. It asks for a file
+name, so it needs a person at the screen. Use a queue that needs no input under IIS.
+
+The [Windows and IIS acceptance checklist](windows-acceptance.md) and the
+[Linux acceptance checklist](linux.md#acceptance-checklist) hold the printer checks for a
+deployment.

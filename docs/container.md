@@ -1,47 +1,55 @@
 # Containers
 
-The Linux container with the iptables isolation below is the recommended
-internet-facing deployment, together with API-key authentication and an HTTPS
-reverse proxy in front of the loopback-bound API. Windows containers are intended
-primarily for internal networks. Firewall
-configuration is optional in general, but is part of the recommended
-internet-facing setup.
+Run Pressroom from its Linux or Windows container image. The files this page names are in the
+`deploy` folder of each release.
+
+For an internet-facing service, use the Linux container with the
+[outbound blocking](#optional-linux-outbound-isolation) below, API keys, and an HTTPS reverse
+proxy in front of the loopback-bound API. Windows containers are meant for intranets.
+
+## Images
 
 Images are published to GitHub Container Registry as `ghcr.io/auroris/pressroom`.
-Linux tags are `<version>-linux`, `<version>`, `latest-linux`, and `latest`;
-Windows tags are `<version>-windows-ltsc2022` and `latest-windows-ltsc2022`.
-Prereleases never update the `latest` tags. Container images are built against
-the newest stable Chromium at build time, whereas the Windows and Linux install
-packages of the same version carry a pinned Chromium; check `/v1/info` for the
-versions actually running. Pull by explicit tag or digest in production.
 
-The Linux image runs on Microsoft's current .NET 10 ASP.NET Core Linux base as
-UID/GID 10001. Chromium sandboxing and dependency validation remain enabled.
+| Platform | Tags |
+|---|---|
+| Linux x64 | `<version>` and `<version>-linux`. `latest` and `latest-linux` for the newest stable version. |
+| Windows Server LTSC 2022 | `<version>-windows-ltsc2022`. `latest-windows-ltsc2022` for the newest stable version. |
 
-## Runtime policy
+A prerelease version never moves the `latest` tags. In production, pull by an explicit tag or by
+digest.
 
-- One application listener: TCP 8080, for rendering, jobs, and health over the API.
-- Outbound isolation is optional. Basic Docker networking permits outgoing
-  connections. The rules below block new connections to the host, peers and
-  internet while preserving responses to API requests.
-- The application filesystem is read-only. `/tmp` and `/var/lib/pressroom` use
-  temporary memory-backed storage for the container's lifetime.
-- `cap_drop: [ALL]` includes NET_ADMIN and NET_RAW; the application cannot alter
-  network policy or open raw sockets.
-- JSON configuration and API keys live outside the container and are mounted
-  read-only.
-- For [Linux printing](printing.md), use a direct host installation with CUPS
-  client tools and configured queues. The supplied image omits those dependencies.
+An image is built with the newest stable Playwright release of its build day, so its Chromium can
+be newer than the one in the Windows and Linux archives of the same version. `/v1/info` reports
+the versions that run.
 
-Jobs and results disappear when this container stops, restarts, or is replaced.
-Download results before replacing it; clients must resubmit lost work. The direct
-Linux installation can use persistent job storage instead.
+The Linux image is built on Microsoft's .NET 10 ASP.NET Core image and runs as UID and GID 10001.
+It listens on TCP 8080, reads `/etc/pressroom/pressroom.settings.json`, and writes under
+`/var/lib/pressroom`. Chromium's sandbox stays on.
+
+## How the Linux container runs
+
+The Compose file and the `docker run` command below set this up:
+
+- **One listener.** TCP 8080 serves rendering, jobs and health.
+- **Read-only file system.** `/tmp` and `/var/lib/pressroom` are memory-backed and last as long as
+  the container.
+- **No capabilities.** `cap_drop: [ALL]` removes NET_ADMIN and NET_RAW among the rest, so the
+  application cannot change network policy or open raw sockets.
+- **Settings from outside.** The JSON settings file, with the API keys, is mounted read-only.
+- **PDF output only.** The image has no CUPS client. For [Linux printing](printing.md), install
+  Pressroom on the host.
+
+**Jobs and their results are lost when the container stops, restarts or is replaced.** Download
+results first. Callers must submit lost work again. A Linux host installation keeps jobs on disk.
+
+Docker's default networking lets the container open outbound connections. The next section blocks
+them.
 
 ## Optional Linux outbound isolation
 
-To add outbound restrictions to ordinary Docker networking, create a dedicated
-bridge and apply these rules before starting its containers. These commands use Docker Engine's
-iptables firewall backend (including iptables-nft).
+Create a dedicated bridge network and add these rules before you start a container on it. The
+commands are for Docker Engine with its iptables firewall backend, which includes iptables-nft.
 
 ```sh
 docker network create --driver bridge \
@@ -54,47 +62,49 @@ sudo ip6tables -I FORWARD 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,R
 sudo ip6tables -I INPUT 1 -i pressroom0 -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP
 ```
 
-The INPUT rules cover host services; forwarded-traffic rules alone are insufficient.
-The IPv6 rules also cover hosts where Docker has no IPv6 DOCKER-USER chain.
-Rules match only `pressroom0`. Persist them using your host's firewall management
-and apply them before container startup after reboot. Run the commands once;
-replace `-I <chain> 1` with `-D <chain>` to remove these exact rules after stopping
-the isolated containers. Do not flush unrelated rules. Use this network exclusively
-for Pressroom and do not attach a second network.
+The rules drop every new connection that leaves the `pressroom0` bridge, to the host, to other
+containers and to the internet, and they let replies to API requests through.
 
-An ordinary Docker `internal` network is insufficient here: it permits access to
-host gateway services, and Docker 29 does not publish its ports. The supplied
-policy keeps normal API port publishing and drops new outbound flows. DNS is
-directed to container loopback so Docker's resolver cannot forward external queries.
+- The `INPUT` rules cover services on the host itself. The forwarding rules alone leave those
+  reachable.
+- The IPv6 rules also cover hosts where Docker has no IPv6 `DOCKER-USER` chain.
+- The rules match `pressroom0` only. Use that network for Pressroom alone, and attach no second
+  network to the container.
+- Run the commands once. Make them persistent with your host's firewall management, so they are
+  in place before the container starts after a reboot.
+- To remove these exact rules, stop the containers and repeat each command with `-D <chain>` in
+  place of `-I <chain> 1`. Leave other rules alone.
 
-The host must permit user namespaces and satisfy its AppArmor policy; see
-[Linux](linux.md). The seccomp profile permits Chromium's namespace calls and its
-`chroot` inside that namespace even when host capabilities are all dropped.
-Never add `SYS_ADMIN` or disable Chromium sandboxing to bypass a startup failure.
+A Docker `internal` network is no substitute: a container on one can still reach services on the
+host gateway, and its ports are not published. The isolated setup also points the container's
+DNS at its own loopback address, so Docker's resolver forwards no outside queries.
 
-Verify the policy after applying it: from inside the running container, a
-connection to a listener on the host gateway and to an internet address must both
-fail while `/v1/health` on the published port still answers.
+The host must allow user namespaces and, on Ubuntu, satisfy AppArmor: see [Linux](linux.md). The
+seccomp profile allows Chromium's namespace calls, and its `chroot` inside that namespace, with
+every host capability dropped. **Never add `SYS_ADMIN` or turn off Chromium's sandbox to get past
+a startup failure.**
+
+After you apply the rules, verify them. From inside the running container, a connection to a
+listener on the host gateway and a connection to an internet address must both fail, while
+`/v1/health` on the published port still answers.
 
 ## Run
 
-The `deploy` folder of each release holds the Compose files, the Kubernetes
-example, the seccomp profile, and the Windows helpers used below. Create
-`deploy/pressroom.settings.json` with API keys. Make it readable by UID or GID
-10001; for example use root ownership, group 10001, and mode 0640. Then:
+Create `deploy/pressroom.settings.json` with API keys. Make it readable by UID or GID 10001, for
+example owned by root, with group 10001 and mode 0640. Then start the container:
 
 ```sh
 PRESSROOM_VERSION=<version> docker compose -f deploy/compose.yaml up -d
 ```
 
-For outbound blocking, first apply the optional rules above, then use:
+With outbound blocking, apply the rules above first, then add the override file:
 
 ```sh
 PRESSROOM_VERSION=<version> docker compose -f deploy/compose.yaml -f deploy/compose.host-isolated.yaml up -d
 ```
 
-Compose publishes only `127.0.0.1:8080`. Place an HTTPS reverse proxy on the host
-for remote clients. The equivalent isolated single-container command is:
+Compose publishes the API on `127.0.0.1:8080` only. Put an HTTPS reverse proxy on the host for
+remote clients. The same isolated container with `docker run`:
 
 ```sh
 docker run -d --name pressroom --init -p 127.0.0.1:8080:8080 \
@@ -109,71 +119,78 @@ docker run -d --name pressroom --init -p 127.0.0.1:8080:8080 \
   ghcr.io/auroris/pressroom:<version>
 ```
 
-Keep `init: true` (Compose) or `--init` (`docker run`). Docker's minimal init runs
-as PID 1, reaps orphaned Chromium helpers and forwards SIGTERM to the service.
-This allows Pressroom's `dotnet` process to shut down gracefully and releases the
-process slots held by orphaned helpers.
+- **Keep `init: true` in Compose, or `--init` with `docker run`.** Docker's init then runs as
+  PID 1. It passes SIGTERM to the service, so Pressroom shuts down in order, and it reaps
+  Chromium helper processes that lose their parent.
+- **Stop timeout.** Keep it above `Render:ShutdownTimeoutMs` plus 5 seconds. The examples use 45
+  seconds for the default of 30.
+- **Health.** Probe `/v1/health`. It stays 200 while the render queue or the job queue is full.
+- **Logs.** Read the console log through Docker. The log files in the state folder go with the
+  container.
+- **Settings.** Application settings come from the JSON file only. `ASPNETCORE_URLS` is a hosting
+  setting, and the image sets it to `http://+:8080`.
+- **Size.** Compose limits the container to 1 CPU and 1.5 GiB of memory, and the memory-backed
+  folders count toward that memory. With jobs enabled, set `Jobs:MaxStoredBytes` below the 512 MiB
+  of the state folder, with room for the logs, the browser's temporary files and one more result.
+  256 MiB is a starting point. Measure your documents before you change the sizes.
 
-Health probes use `/v1/health`, which stays healthy when the jobs queue is full.
-Keep the stop timeout above `Render:ShutdownTimeoutMs` plus a cleanup margin. Console logs are
-available through Docker; files inside the state filesystem are temporary.
-Application settings are JSON-only; `ASPNETCORE_URLS` is a hosting setting.
+## Check a running container
 
-Compose limits the container to 1 CPU and 1.5 GiB RAM. Temporary files consume that
-memory budget too. If jobs are enabled, set `Jobs:MaxStoredBytes` below the 512 MiB
-state limit, leaving room for logs, browser temporary files, and a result commit;
-256 MiB is a reasonable starting budget. Measure actual documents before resizing.
+- `GET /v1/health` returns 200.
+- `GET /v1/info` with a key reports the expected version, and with an invalid key returns 401.
+- A render with a key returns a PDF.
+- With outbound blocking, the connection tests under
+  [Optional Linux outbound isolation](#optional-linux-outbound-isolation) fail as described.
 
 ## Kubernetes
 
-The [Kubernetes example](../deploy/kubernetes.yaml) uses a settings Secret,
-memory-backed temporary storage, one replica, and a NetworkPolicy allowing only
-TCP 8080 ingress with no egress. The CNI must enforce NetworkPolicy. Install the
-seccomp profile under each node's kubelet. `emptyDir` lasts for the Pod lifetime;
-replacing a Pod removes its state. This manifest has not been exercised on a
-cluster. Kubernetes has no `init: true` equivalent, so by default the service is
-PID 1 in its Pod. Set `shareProcessNamespace: true` (the pause container then
-reaps orphans) or use a derived image whose entry point is a tiny init such as
-`tini` if orphaned Chromium processes must be reaped.
+The [Kubernetes example](../deploy/kubernetes.yaml) has one replica, a Secret named
+`pressroom-settings` for the settings file, memory-backed volumes for the state, `/tmp` and
+`/dev/shm`, and a NetworkPolicy that allows TCP 8080 in and nothing out. This manifest has not
+been run on a cluster.
+
+- The cluster's network plugin must enforce NetworkPolicy.
+- Install `pressroom-seccomp.json` as `seccomp/pressroom.json` under the kubelet root of each
+  node.
+- An `emptyDir` volume lasts as long as its Pod. Replacing the Pod removes its jobs and results.
+- Kubernetes has no equivalent of `init: true`, so the service is PID 1 in its Pod. To reap
+  Chromium processes that lose their parent, set `shareProcessNamespace: true`, or build an image
+  whose entry point is a small init such as `tini`.
 
 ## Windows containers
 
-Windows containers are intended primarily for intranet deployments. Use the
-Linux container with iptables isolation for the recommended internet-facing setup.
+The Windows image is built on the Windows Server LTSC 2022 base with the .NET 10 runtime, for a
+Windows Server 2022 host. A Windows base image must match the host's version. The image needs
+the full Windows Server base: on Server Core, the sandboxed browser check fails.
 
-The Windows image uses the latest serviced Windows Server LTSC 2022 base and
-the .NET 10 runtime, matching a Windows Server 2022 host. Windows base versions
-must match a supported host; an arbitrary newest Windows tag is not interchangeable
-with LTSC 2022. The full Windows Server base is required: Server Core does not pass
-the sandboxed browser check.
-
-Put `pressroom.settings.json` in a dedicated external directory, with
-`Paths:StateRoot` set to `C:\state`. Leave printing settings empty. Start with the
-helper from the release's `deploy` folder:
+Put `pressroom.settings.json` in a folder of its own, with `Paths:StateRoot` set to `C:\state`
+and no printing settings. The helper refuses other values. Start the container with the helper
+from the `deploy` folder:
 
 ```powershell
 .\deploy\Start-WindowsContainer.ps1 -ConfigurationDirectory C:\Pressroom\config `
   -Image ghcr.io/auroris/pressroom:<version>-windows-ltsc2022
 ```
 
-This publishes only TCP 8080, mounts configuration read-only, runs as
-ContainerUser, and uses `--rm` so stopping or crashing removes the complete
-writable layer. Start a new container with the helper after a stop or host reboot.
-Use stop followed by the start helper when discarding state: `docker restart`
-retains the same Windows writable layer, even with `--rm`.
-Windows Docker uses the unprivileged Windows identity and disposable writable
-layer for this deployment's process permissions and state lifecycle.
+The helper mounts the folder read-only at `C:\config`, publishes container port 8080 on host port
+8080 (`-Port` selects another), and sets a stop timeout of 45 seconds. The container runs as
+`ContainerUser`.
 
-Outbound blocking is optional on Windows too. Add `-BlockOutbound` to the start
-helper to install and verify the dedicated HNS host and switch ACLs **before**
-startup; it runs `deploy\Install-WindowsContainerPolicy.ps1`. Only that option
-requires an administrator session beyond normal Docker access. The rules allow
-API responses, block new outgoing traffic, and close the Windows base's other
-service ports on the container interface. They affect only the dedicated network.
+**State.** The helper passes `--rm`, so a container that stops or crashes is removed with
+everything it wrote. Start a new one with the helper after a stop or a host reboot. To discard
+state, stop the container and start a new one: `docker restart` keeps the same writable layer.
+
+**Outbound blocking.** Add `-BlockOutbound`, from an administrator session. The helper then runs
+`Install-WindowsContainerPolicy.ps1` before it starts the container. That script creates the
+`pressroom-egress-blocked` NAT network and installs and verifies HNS rules on it: they allow
+inbound TCP 8080, block every new outbound connection, and close the other ports of the container
+interface. The rules apply to that network only. If the script's default subnet,
+`172.30.77.0/24`, overlaps one of yours, run the script yourself first with `-Subnet` and
+`-Gateway`.
 
 ## Upgrade and rollback
 
-Pull an explicit tag or digest, finish and download required jobs, then recreate
-the container with the same external configuration. Roll back by recreating it
-from the previous image digest. Recreating the container discards its temporary
-jobs and results. Keep the host firewall installed throughout the change.
+Pull an explicit tag or digest, download the job results you need, then create the container
+again with the same settings file. To roll back, create it from the previous image digest. Either
+way the new container starts with no jobs or results. Keep the host firewall rules in place
+throughout.

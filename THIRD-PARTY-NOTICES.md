@@ -29,5 +29,5 @@ app-local redistributable, obtain it from Microsoft's permitted distribution,
 preserve its license/notice files, and add its version and hashes to the package.
 
 Development test dependencies are resolved in their own projects and are not
-published with the server. Pressroom's own source licensing is left to the owner;
+published with the server. Pressroom itself is under the MIT license in `LICENSE`;
 this notice does not grant a new license to the Pressroom application.
