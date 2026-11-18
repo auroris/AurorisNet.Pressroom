@@ -30,11 +30,12 @@ the context when the request ends.
 | Navigation | When the main document navigates away from the submitted HTML, Pressroom closes the page and the render fails. |
 | Chromium sandbox | Always on. Pressroom refuses to start with `Render:ChromiumSandbox` set to `false`, or when the sandboxed browser cannot start. |
 
-Two cases fail a render in the packaged Chromium. A header or footer template that tries to load
-an external resource is either rejected or runs into the request deadline. A WebRTC attempt
-inside a `srcdoc` or blank child frame, under the connection policy, ends that render. In both
-cases the caller gets an error without document content, the context closes, and later renders
-work.
+One case fails a render in the packaged Chromium: a header or footer template that tries to load
+an external resource is either rejected or runs into the request deadline. The caller gets an
+error without document content, the context closes, and later renders work.
+
+A WebRTC attempt is blocked by the connection policy, in the document and inside a `srcdoc` child
+frame alike. It sends nothing, and the render goes on.
 
 ## Authentication
 

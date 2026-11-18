@@ -64,16 +64,58 @@ jobs:
       - name: Build
         run: dotnet build Pressroom.slnx -c Release --no-restore -p:ContinuousIntegrationBuild=true
 
-      # Real-browser tests stay off: they need the published browser payload, which the
-      # Release workflow builds and tests before anything ships.
+      # Real-browser tests stay off here: they need the published browser payload. The browser job below runs them
+      # for a Playwright update, and the Release workflow runs them before anything ships.
       - name: Run tests
         run: dotnet test --solution Pressroom.slnx -c Release --no-build --no-restore
+
+  # A Playwright update changes the Chromium build, which only the real-browser tests exercise. Dependabot names the
+  # branch of its playwright group dependabot/nuget/playwright-..., so this job runs for that pull request, and for a
+  # run started by hand. The update merges only when the sandbox and rendering tests pass on the new Chromium.
+  browser:
+    name: Test the packaged browser
+    if: github.event_name == 'workflow_dispatch' || contains(github.head_ref, 'playwright')
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            10.0.x
+            8.0.x
+
+      # Publishing installs the Chromium headless shell that the pinned Playwright selects.
+      - name: Publish the server with its browser
+        run: |
+          dotnet publish src/Pressroom.Server/Pressroom.Server.csproj -c Release -p:PublishProfile=IisFolder
+          if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
+
+      - name: Run the real-browser tests
+        env:
+          PRESSROOM_RUN_BROWSER_TESTS: '1'
+          PRESSROOM_TEST_SANDBOX: 'true'
+          PRESSROOM_TEST_BROWSERS_PATH: ${{ github.workspace }}/artifacts/publish/IisFolder/browsers
+        run: |
+          dotnet test --project tests/Pressroom.Rendering.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'The rendering tests failed on the packaged browser.' }
+          dotnet test --project tests/Pressroom.Server.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'The server tests failed on the packaged browser.' }
 
   # A workflow that runs for Dependabot gets a read-only token unless the job asks for more.
   dependabot:
     name: Merge Dependabot update
-    needs: test
-    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    needs: [test, browser]
+    # The browser job is skipped for updates other than Playwright's.
+    if: >-
+      always() && needs.test.result == 'success' &&
+      (needs.browser.result == 'success' || needs.browser.result == 'skipped') &&
+      github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

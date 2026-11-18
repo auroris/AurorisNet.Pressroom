@@ -358,7 +358,13 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
         var tcpPort = ((IPEndPoint)tcp.LocalEndpoint).Port;
         var udpPort = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
         var child = $$"""
+            <p id="status">SRCDOC_RTC_PENDING</p>
             <script>
+            let enforced = false;
+            new ReportingObserver(reports => {
+                if (reports.some(report => report.type === 'connection-allowlist'
+                    && report.body.connection === 'webrtc' && report.body.disposition === 'enforce')) enforced = true;
+            }, { types: ['connection-allowlist'], buffered: true }).observe();
             try {
                 const rtc = new RTCPeerConnection({ iceServers: [
                     { urls:'stun:127.0.0.1:{{udpPort}}' },
@@ -367,16 +373,22 @@ public sealed class SandboxTests(BrowserFixture fixture) : IClassFixture<Browser
                 window.rtcProbe = rtc; rtc.createDataChannel('probe');
                 rtc.createOffer().then(offer => rtc.setLocalDescription(offer)).catch(() => {});
             } catch {}
+            setTimeout(() => {
+                document.querySelector('#status').textContent = enforced ? 'SRCDOC_RTC_BLOCKED' : 'SRCDOC_RTC_UNREPORTED';
+            }, 1000);
             </script>
             """;
-        // The pinned Chromium terminates this srcdoc renderer when denying RTC.
-        // Verify the failure remains contained and cannot grant network access.
-        await Assert.ThrowsAsync<RenderDocumentException>(() => fixture.RenderAsync(
+        // The pinned Chromium applies the document's connection allowlist inside a srcdoc frame: the frame
+        // receives the report that its WebRTC attempt was blocked, and rendering goes on. The Chromium that
+        // Playwright 1.64 selected ended the frame's renderer instead, which failed the request.
+        // Verify the block is enforced in the frame and sends nothing.
+        var result = await fixture.RenderAsync(
             $"<p>SRCDOC_PROBE</p><iframe srcdoc=\"{WebUtility.HtmlEncode(child)}\"></iframe>",
-            new() { JavaScript = true, Readiness = new() { DelayMs = 1_500 } }));
+            new() { JavaScript = true, Readiness = new() { DelayMs = 1_500 } });
+        Assert.Contains("SRCDOC_RTC_BLOCKED", PdfText(result.Pdf));
         Assert.False(tcp.Pending(), "A srcdoc WebRTC TURN attempt reached the TCP listener.");
         Assert.Equal(0, udp.Available);
-        Assert.Equal(1, (await fixture.RenderAsync("<p>RTC failure recovered</p>")).PageCount);
+        Assert.Equal(1, (await fixture.RenderAsync("<p>RTC check recovered</p>")).PageCount);
     }
 
     [BrowserFact]
