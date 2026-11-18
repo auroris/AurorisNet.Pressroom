@@ -20,11 +20,11 @@ sudo apt-get install libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 \
   libatspi2.0-0t64 libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 \
   libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
   libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 \
-  fontconfig fonts-noto-core
+  libatomic1 fontconfig fonts-noto-core
 ```
 
-This is the Chromium dependency list of the packaged Playwright release. Debian 13 uses the same
-package names. Keep `fontconfig` and the Noto fonts: header and footer templates use system fonts,
+This is the Chromium dependency list of the packaged Playwright release, with `libatomic1`, which
+the Playwright driver's own Node runtime needs. Debian 13 uses the same package names. Keep `fontconfig` and the Noto fonts: header and footer templates use system fonts,
 while the document body uses the packaged faces. Playwright checks the installed libraries when
 the browser starts.
 
