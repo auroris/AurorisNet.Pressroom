@@ -9,7 +9,7 @@
     <PackageReference Include="Microsoft.Playwright" Version="$(PressroomPlaywrightVersion)" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.15" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.15" />
-    <PackageReference Include="AngleSharp" Version="1.10.4" />
+    <PackageReference Include="AngleSharp" Version="1.10.5" />
     <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
   <ItemGroup>
