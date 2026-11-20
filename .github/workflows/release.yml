@@ -3,8 +3,8 @@ name: Release
 run-name: Release ${{ inputs.version || format('(next {0})', inputs.bump) }}${{ inputs.dry-run && ' (dry run)' || '' }}
 
 # Builds and verifies the Windows and Linux installers and the client package, publishes them as a GitHub release and
-# pushes the client package to nuget.org. Starts by hand, or from the CI workflow when a Dependabot update of a shipped
-# package has passed the tests. The shared steps come from auroris/AurorisNet.Build, whose docs/releasing.md describes
+# pushes the client package to nuget.org. Starts by hand, or from the Weekly release workflow when an update of a shipped
+# package has been merged. The shared steps come from auroris/AurorisNet.Build, whose docs/releasing.md describes
 # them. nuget.org trusts this file by its name, so keep it release.yml. Container images are a separate workflow.
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ on:
           - patch
           - minor
       test:
-        description: Run the unit tests before publishing. The automated runs turn this off, because they have just run them.
+        description: Run the unit tests before publishing.
         type: boolean
         default: true
       dry-run:

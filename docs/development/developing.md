@@ -291,7 +291,7 @@ what is particular to Pressroom.
 build that every installer and container ships. Its version is the `PressroomPlaywrightVersion`
 property in `src/Pressroom.Rendering/Pressroom.Rendering.csproj`.
 
-**Dependabot** (`.github/dependabot.yml`) checks NuGet each day and workflow actions each week.
+**Dependabot** (`.github/dependabot.yml`) checks NuGet and workflow actions each week.
 It opens one pull request for Playwright, one for the test packages, one for the other packages
 and one for the actions. It proposes no major update of Playwright, or of the
 `Microsoft.AspNetCore.*` and `Microsoft.Extensions.*` packages, which follow the `net10.0` target
@@ -299,8 +299,10 @@ framework. The Dockerfiles use floating base image tags that the build scripts a
 Dependabot does not watch them.
 
 **`ci.yml`** runs on each pull request. It builds and runs the tests on Windows and Linux, without
-the real-browser tests. It then merges a Dependabot update that passed, and starts `release.yml`
-when the update is of a package that a project under `src` references.
+the real-browser tests. It then merges a Dependabot update that passed.
+
+**`weekly-release.yml`**, named Weekly release, runs each Tuesday. It starts `release.yml` once when
+an update merged since the last release is of a package that a project under `src` references.
 
 **`release.yml`**, named Release, takes the inputs `version`, `bump`, `test`, `dry-run` and
 `notes`. A version with a suffix, such as `1.2.3-rc.1`, is a prerelease. Its jobs:

@@ -204,9 +204,9 @@ covers publishing, the Linux package and the container images.
 
 Pressroom follows Microsoft.Playwright, which selects the Chromium build that every installer and
 container ships. Its version is the `PressroomPlaywrightVersion` property in
-`src/Pressroom.Rendering/Pressroom.Rendering.csproj`. Dependabot checks NuGet each day and gives
-Playwright a pull request of its own. `ci.yml` tests it on Windows and Linux, merges it and
-starts `release.yml`. Versions are `MAJOR.MINOR.PATCH`.
+`src/Pressroom.Rendering/Pressroom.Rendering.csproj`. Dependabot checks NuGet each week and gives
+Playwright a pull request of its own. `ci.yml` tests it on Windows and Linux and merges it, and
+`weekly-release.yml` publishes the week's merged updates as one release. Versions are `MAJOR.MINOR.PATCH`.
 
 One release holds the Windows x64 ZIP, the Linux x64 tarball, the client `.nupkg` and `.snupkg`,
 a `.sha256` file for each of those, and the SPDX SBOM. It also pushes the client package to

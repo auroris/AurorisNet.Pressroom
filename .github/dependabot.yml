@@ -1,16 +1,17 @@
 # Dependabot opens the pull requests that .github/workflows/ci.yml tests and merges. An update of a shipped package then
-# starts the Release workflow, as docs/releasing.md in auroris/AurorisNet.Build describes.
+# goes out in the next weekly release, as docs/releasing.md in auroris/AurorisNet.Build describes.
 version: 2
 updates:
   - package-ecosystem: nuget
     directory: /
     schedule:
-      interval: daily
+      interval: weekly
+      day: monday
     open-pull-requests-limit: 10
     groups:
       # Microsoft.Playwright is the primary dependency: it selects the Chromium build that
       # every installer and container ships. It gets its own pull request, so each Playwright
-      # update becomes its own release. Its version is the PressroomPlaywrightVersion
+      # update is tested and merged on its own. Its version is the PressroomPlaywrightVersion
       # property in src/Pressroom.Rendering/Pressroom.Rendering.csproj.
       playwright:
         patterns:
